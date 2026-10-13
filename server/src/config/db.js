@@ -1,11 +1,21 @@
 const mongoose = require('mongoose');
 
+let isConnected = false;
+
 const connectDB = async () => {
+  if (isConnected && mongoose.connection.readyState === 1) {
+    return;
+  }
+
   try {
-    const conn = await mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/quizese', {
+    const db = await mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/quizese', {
       serverSelectionTimeoutMS: 5000,
+      connectTimeoutMS: 5000,
+      socketTimeoutMS: 20000,
+      maxPoolSize: 10,
     });
-    console.log(`[Database] MongoDB Connected: ${conn.connection.host}`);
+    isConnected = db.connections[0].readyState === 1;
+    console.log(`[Database] MongoDB Connected: ${db.connection.host}`);
   } catch (error) {
     console.warn(`[Database Warning] Could not connect to MongoDB at ${process.env.MONGO_URI}: ${error.message}`);
     console.warn('[Database Warning] Continuing in development/offline-fallback mode if DB is unavailable.');
