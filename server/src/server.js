@@ -20,6 +20,7 @@ const predictionRoutes = require('./routes/predictionRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 
 const app = express();
+app.enable('trust proxy');
 const server = http.createServer(app);
 
 // Initialize Socket.io
