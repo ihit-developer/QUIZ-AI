@@ -1,3 +1,4 @@
+
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "services": {
@@ -12,12 +13,6 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": {
-        "service": "backend"
-      }
-    },
-    {
-      "source": "/socket.io/(.*)",
       "destination": {
         "service": "backend"
       }
