@@ -23,9 +23,11 @@ const app = express();
 const server = http.createServer(app);
 
 // Initialize Socket.io
+const clientOrigin = process.env.CLIENT_SERVICE_URL || process.env.CLIENT_URL || 'http://localhost:5173';
+
 const io = new Server(server, {
   cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:5173',
+    origin: clientOrigin,
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true,
   },
@@ -50,6 +52,7 @@ const allowedOrigins = [
   'http://localhost:5174',
   'http://localhost:3000',
   process.env.CLIENT_URL,
+  process.env.CLIENT_SERVICE_URL,
 ].filter(Boolean);
 
 app.use(

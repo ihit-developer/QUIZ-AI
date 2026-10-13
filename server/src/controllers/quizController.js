@@ -12,7 +12,7 @@ const memoryQuestions = new Map();
 const seedDemoQuiz = async () => {
   if (memoryQuizzes.size === 0) {
     const demoCode = 'JS8821';
-    const clientBaseUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+    const clientBaseUrl = process.env.CLIENT_SERVICE_URL || process.env.CLIENT_URL || 'http://localhost:5173';
     const joinUrl = `${clientBaseUrl}/join/${demoCode}`;
     const qrCode = await generateQRCodeDataUrl(joinUrl);
 
@@ -121,7 +121,7 @@ const createQuiz = async (req, res, next) => {
 
     // Generate unique 6-character join code
     let joinCode = generateJoinCode(6);
-    const clientBaseUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+    const clientBaseUrl = process.env.CLIENT_SERVICE_URL || process.env.CLIENT_URL || 'http://localhost:5173';
     const joinUrl = `${clientBaseUrl}/join/${joinCode}`;
     const qrCodeDataUrl = await generateQRCodeDataUrl(joinUrl);
 
