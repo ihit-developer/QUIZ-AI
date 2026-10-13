@@ -1,0 +1,473 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap');
+
+:root {
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color-scheme: light;
+
+  /* Day (Light Mode) Semantic Tokens - 100% Red & Warm Neutral Palette */
+  --bg: #fffafa;
+  --surface: #ffffff;
+  --surface-2: #fff1f2;
+  --border: #f0d5d5;
+  --text: #1c1917;
+  --text-muted: #6b5b5b;
+  --primary: #e11d48;
+  --primary-hover: #be123c;
+  --on-primary: #ffffff;
+  --primary-soft: #ffe4e6;
+  --primary-text: #be123c;
+  --ring: #e11d48;
+  --hero: #9f1239;
+
+  /* Card shadow in light mode */
+  --card-shadow: 0 8px 28px rgba(106, 24, 45, 0.08);
+
+  /* Radius & Spacing */
+  --radius-card: 1rem;       /* 16px */
+  --radius-btn: 0.75rem;      /* 12px */
+  --radius-pill: 9999px;
+}
+
+.dark {
+  color-scheme: dark;
+
+  /* Night (Dark Mode) Semantic Tokens - Pure Charcoal & Red, Zero Navy */
+  --bg: #0c0a0a;
+  --surface: #1a1414;
+  --surface-2: #241a1a;
+  --border: #3a2a2a;
+  --text: #faf5f5;
+  --text-muted: #c9b8b8;
+  --primary: #f43f5e;
+  --primary-hover: #fb7185;
+  --on-primary: #ffffff;
+  --primary-soft: #3b1219;
+  --primary-text: #fda4af;
+  --ring: #fb7185;
+  --hero: #7f1d1d;
+
+  /* In dark mode use border contrast instead of shadow */
+  --card-shadow: none;
+}
+
+/* Reset */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-family: var(--font-sans);
+  scroll-behavior: smooth;
+  accent-color: var(--primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background: radial-gradient(circle at 8% 0%, rgba(253, 164, 175, .18), transparent 28rem), radial-gradient(circle at 100% 30%, rgba(255, 228, 230, .72), transparent 34rem), var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+/* System Overrides: Selection & Focus */
+::selection {
+  background-color: var(--primary-soft);
+  color: var(--primary-text);
+}
+
+:focus-visible {
+  outline: 2px solid var(--ring) !important;
+  outline-offset: 2px !important;
+}
+
+/* Autofill Overrides: keeps theme background & text color */
+input:-webkit-autofill,
+input:-webkit-autofill:hover, 
+input:-webkit-autofill:focus, 
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-text-fill-color: var(--text) !important;
+  -webkit-box-shadow: 0 0 0px 1000px var(--surface) inset !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  outline: none;
+}
+
+input, textarea, select {
+  font-family: inherit;
+  outline: none;
+}
+
+input, textarea, select {
+  transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease;
+}
+input:focus, textarea:focus, select:focus {
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+/* Crisp Flat Card (Zero Blur, Zero Backdrop-Filter) */
+.card-solid {
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--card-shadow);
+  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow .18s ease;
+}
+.card-solid:hover { border-color: color-mix(in srgb, var(--primary) 30%, var(--border)); }
+
+/* Authentication pages: focused, mobile-first form layout */
+.auth-v2-page { height: 100%; display: grid; place-items: center; padding: 1.25rem 1rem; background: radial-gradient(circle at 15% 15%, var(--primary-soft), transparent 32%), var(--bg); }
+.auth-v2-card { width: min(100%, 460px); padding: 1.75rem 2.25rem; border: 1px solid var(--border); border-radius: 24px; background: var(--surface); box-shadow: 0 22px 60px rgba(97, 20, 43, .12); }
+.auth-v2-brand { display: flex; align-items: center; gap: .65rem; font-size: 1.28rem; font-weight: 900; color: var(--text); letter-spacing: -.04em; }
+.auth-v2-brand > span > span { color: var(--primary); }
+.auth-v2-mark { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; background: var(--primary); color: #fff; }
+.auth-v2-copy { margin: 1.35rem 0 1.15rem; }
+.auth-v2-eyebrow { color: var(--primary-text); display: flex; align-items: center; gap: .35rem; font-size: .72rem; font-weight: 900; letter-spacing: .08em; }
+.auth-v2-copy h1 { color: var(--text); font-size: clamp(1.75rem, 5vw, 2.25rem); line-height: 1.1; margin: .65rem 0; letter-spacing: -.05em; }
+.auth-v2-copy p { color: var(--text-muted); font-size: .92rem; line-height: 1.6; }
+.auth-v2-form { display: flex; flex-direction: column; gap: .75rem; }
+.auth-v2-form .btn-primary { width: 100%; margin-top: .2rem; }
+.auth-v2-forgot, .auth-v2-link { color: var(--primary-text); font-size: .84rem; font-weight: 800; text-align: right; padding: .15rem 0; }
+.auth-v2-link { text-align: center; }
+.auth-v2-link:disabled { color: var(--text-muted); cursor: not-allowed; }
+.auth-v2-divider { display: flex; align-items: center; gap: .75rem; color: var(--text-muted); font-size: .72rem; font-weight: 800; text-transform: uppercase; }
+.auth-v2-divider::before, .auth-v2-divider::after { content: ''; height: 1px; background: var(--border); flex: 1; }
+.auth-v2-google { min-height: 46px; display: inline-flex; align-items: center; justify-content: center; gap: .7rem; border: 1px solid var(--border); border-radius: var(--radius-btn); background: var(--surface); color: var(--text); font-size: .92rem; font-weight: 800; transition: .18s ease; }
+.auth-v2-google:hover { border-color: #4285f4; transform: translateY(-1px); box-shadow: var(--card-shadow); }
+.auth-v2-roles { display: grid; grid-template-columns: 1fr 1fr; gap: .55rem; padding: .3rem; border-radius: var(--radius-btn); background: var(--surface-2); }
+.auth-v2-roles button { min-height: 40px; border-radius: 9px; color: var(--text-muted); font-size: .83rem; font-weight: 800; }
+.auth-v2-roles button.selected { color: var(--primary-text); background: var(--surface); box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+.auth-v2-footer { margin-top: 1rem; padding-top: .9rem; border-top: 1px solid var(--border); color: var(--text-muted); text-align: center; font-size: .85rem; }
+.auth-v2-footer a { color: var(--primary-text); font-weight: 900; }
+/* The registration form has one extra field and a role picker, so keep it compact. */
+.auth-v2-page:has(.auth-v2-roles) .auth-v2-card { padding-top: 1.2rem; padding-bottom: 1.1rem; }
+.auth-v2-page:has(.auth-v2-roles) .auth-v2-copy { margin: .8rem 0; }
+.auth-v2-page:has(.auth-v2-roles) .auth-v2-copy h1 { margin: .35rem 0; font-size: clamp(1.5rem, 4vw, 2rem); }
+.auth-v2-page:has(.auth-v2-roles) .auth-v2-copy p { font-size: .84rem; line-height: 1.35; }
+.auth-v2-page:has(.auth-v2-roles) .auth-v2-form { gap: .55rem; }
+.auth-v2-page:has(.auth-v2-roles) .auth-v2-footer { margin-top: .7rem; padding-top: .65rem; }
+@media (max-width: 480px) { .auth-v2-page { height: auto; min-height: 100%; padding: 1rem .65rem; align-items: start; } .auth-v2-card { padding: 1.5rem; border-radius: 18px; } }
+@media (max-width: 480px) {
+  .auth-v2-page:has(.auth-v2-roles) { height: 100dvh; min-height: 100dvh; padding: .45rem .65rem; place-items: start center; overflow: hidden; }
+  .auth-v2-page:has(.auth-v2-roles) .auth-v2-card { padding: .8rem 1rem; border-radius: 16px; }
+  .auth-v2-page:has(.auth-v2-roles) .auth-v2-brand { font-size: 1.05rem; }
+  .auth-v2-page:has(.auth-v2-roles) .auth-v2-mark { width: 32px; height: 32px; border-radius: 10px; }
+  .auth-v2-page:has(.auth-v2-roles) .auth-v2-copy { margin: .45rem 0; }
+  .auth-v2-page:has(.auth-v2-roles) .auth-v2-copy h1 { font-size: 1.4rem; margin: .2rem 0; }
+  .auth-v2-page:has(.auth-v2-roles) .auth-v2-copy p { display: none; }
+  .auth-v2-page:has(.auth-v2-roles) .auth-v2-form { gap: .4rem; }
+  .auth-v2-page:has(.auth-v2-roles) .auth-v2-roles button { min-height: 34px; }
+  .auth-v2-page:has(.auth-v2-roles) .auth-v2-google { min-height: 40px; }
+  .auth-v2-page:has(.auth-v2-roles) .auth-v2-footer { margin-top: .45rem; padding-top: .45rem; }
+}
+@media (max-height: 700px) and (min-width: 481px) {
+  .auth-v2-page:has(.auth-v2-roles) { padding: .5rem 1rem; }
+  .auth-v2-page:has(.auth-v2-roles) .auth-v2-card { padding: .85rem 1.5rem; }
+  .auth-v2-page:has(.auth-v2-roles) .auth-v2-copy p { display: none; }
+  .auth-v2-page:has(.auth-v2-roles) .auth-v2-copy { margin: .45rem 0; }
+  .auth-v2-page:has(.auth-v2-roles) .auth-v2-form { gap: .4rem; }
+}
+
+/* Primary Button */
+.btn-primary {
+  background: linear-gradient(135deg, var(--primary), var(--hero));
+  color: var(--on-primary);
+  font-weight: 700;
+  border-radius: var(--radius-btn);
+  padding: 0.75rem 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  box-shadow: 0 5px 12px rgba(190, 18, 60, .18);
+  transition: transform 0.18s ease, background-color 0.18s ease, box-shadow .18s ease;
+  min-height: 44px;
+}
+.btn-primary:hover {
+  background: linear-gradient(135deg, var(--primary-hover), var(--hero));
+  transform: translateY(-2px);
+  box-shadow: 0 9px 18px rgba(190, 18, 60, .25);
+}
+.btn-primary:active {
+  transform: scale(0.98);
+}
+
+/* Secondary Button */
+.btn-secondary {
+  background-color: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn);
+  padding: 0.75rem 1.4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  transition: border-color 0.18s ease, color 0.18s ease, transform 0.18s ease, background-color .18s ease;
+  min-height: 44px;
+}
+.btn-secondary:hover {
+  border-color: var(--primary);
+  color: var(--primary-text);
+  background-color: var(--primary-soft);
+  transform: translateY(-2px);
+}
+.btn-secondary:active {
+  transform: scale(0.98);
+}
+
+/* Destructive / Danger Button */
+.btn-danger {
+  background-color: var(--hero);
+  color: var(--on-primary);
+  font-weight: 700;
+  border-radius: var(--radius-btn);
+  padding: 0.75rem 1.4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  transition: transform 0.18s ease, filter 0.18s ease;
+  min-height: 44px;
+}
+.btn-danger:hover {
+  filter: brightness(1.15);
+  transform: translateY(-2px);
+}
+.btn-danger:active {
+  transform: scale(0.98);
+}
+
+/* Red Semantic Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Success Badge (Solid Dark Red with Check Icon) */
+.badge-success {
+  background-color: var(--hero);
+  color: var(--on-primary);
+  border: 1px solid var(--hero);
+}
+
+/* Error/Wrong Badge (Outlined Red with X Icon) */
+.badge-error {
+  background-color: transparent;
+  color: var(--primary-text);
+  border: 1.5px solid var(--primary);
+}
+
+/* Warning Badge (Soft Red Tint with Alert Icon) */
+.badge-warning {
+  background-color: var(--primary-soft);
+  color: var(--primary-text);
+  border: 1px solid var(--border);
+}
+
+/* Info / Neutral Badge */
+.badge-info {
+  background-color: var(--surface-2);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+/* Primary Badge */
+.badge-primary {
+  background-color: var(--primary-soft);
+  color: var(--primary-text);
+  border: 1px solid var(--border);
+}
+
+/* Typography Helpers */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Thin Custom Red Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 9999px;
+  transition: background 0.15s ease;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--primary);
+}
+
+/* Hardware-Accelerated Skeleton Shimmer */
+.skeleton {
+  background-color: var(--surface-2);
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-btn);
+}
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(225, 29, 72, 0.07), transparent);
+  animation: skeletonShimmer 1.5s infinite;
+}
+
+/* Shared content polish */
+h1, h2, h3 { letter-spacing: -.025em; }
+main > div > .card-solid { box-shadow: var(--card-shadow); }
+table tbody tr:last-child { border-bottom: 0 !important; }
+table tbody tr { transition: background-color .16s ease, transform .16s ease; }
+@media (min-width: 840px) { .card-solid { border-radius: 18px; } }
+
+@keyframes skeletonShimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Responsive Navbar Navigation Rules */
+.desktop-links {
+  display: none !important;
+}
+.mobile-menu-btn {
+  display: inline-flex !important;
+}
+
+/* User pill responsive handling */
+.nav-user-details {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  max-width: 220px;
+}
+
+.nav-user-name {
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.nav-user-role {
+  display: inline-flex;
+}
+
+.nav-brand-badge {
+  display: inline-flex;
+}
+
+/* Tablet / Medium Screens (< 840px): collapse links into hamburger menu */
+@media (max-width: 839px) {
+  .desktop-links {
+    display: none !important;
+  }
+  .mobile-menu-btn {
+    display: inline-flex !important;
+  }
+  .nav-user-role {
+    display: none !important;
+  }
+  .nav-brand-badge {
+    display: none !important;
+  }
+  .nav-user-details {
+    max-width: 150px;
+  }
+  .nav-user-name {
+    max-width: 80px;
+  }
+}
+
+/* Mobile Screens (< 520px): optimize name display so it fits nicely next to toggle and hamburger */
+@media (max-width: 519px) {
+  .nav-user-details {
+    max-width: 120px;
+    padding: 0.25rem 0.5rem !important;
+  }
+  .nav-user-name {
+    max-width: 65px;
+    font-size: 0.78rem !important;
+  }
+  .nav-auth-btn-text {
+    font-size: 0.78rem !important;
+    padding: 0.35rem 0.65rem !important;
+  }
+}
+
+/* Extra small mobile (< 380px): show avatar initial only */
+@media (max-width: 379px) {
+  .nav-user-name {
+    display: none !important;
+  }
+  .nav-user-details {
+    padding: 0.25rem !important;
+    border-radius: 50% !important;
+  }
+}
+
+/* Desktop Screens (840px and wider): show full links, hide hamburger */
+@media (min-width: 840px) {
+  .desktop-links {
+    display: flex !important;
+  }
+  .mobile-menu-btn {
+    display: none !important;
+  }
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Host Quiz Grid: 2-column on desktop, stacked on mobile */
+.host-quiz-grid {
+  display: grid !important;
+  grid-template-columns: 1fr 340px !important;
+  gap: 1.25rem !important;
+  align-items: start !important;
+}
+
+@media (max-width: 900px) {
+  .host-quiz-grid {
+    grid-template-columns: 1fr !important;
+  }
+}

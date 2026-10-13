@@ -1,0 +1,59 @@
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: quizese-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - quizese-network
+
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: quizese-server
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+      - NODE_ENV=production
+      - MONGO_URI=mongodb://mongodb:27017/quizese
+      - CLIENT_URL=${CLIENT_URL:?Set CLIENT_URL in the root .env file}
+      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET:?Set JWT_ACCESS_SECRET in the root .env file}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET in the root .env file}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+    depends_on:
+      - mongodb
+    networks:
+      - quizese-network
+
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:5000/api/v1}
+        VITE_SOCKET_URL: ${VITE_SOCKET_URL:-http://localhost:5000}
+    container_name: quizese-client
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - server
+    networks:
+      - quizese-network
+
+volumes:
+  mongo-data:
+
+networks:
+  quizese-network:
+    driver: bridge
