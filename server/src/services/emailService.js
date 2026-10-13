@@ -12,18 +12,32 @@ const sendOtpEmail = async ({ email, code, purpose, name = 'there' }) => {
     return;
   }
   try {
-    const transport = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT || 587),
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-      connectionTimeout: 5000,
-      greetingTimeout: 5000,
-      socketTimeout: 8000,
+    const isGmail = (process.env.SMTP_HOST || '').includes('gmail');
+    const transportConfig = isGmail
+      ? {
+          service: 'gmail',
+          auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+          connectionTimeout: 10000,
+        }
+      : {
+          host: process.env.SMTP_HOST,
+          port: Number(process.env.SMTP_PORT || 587),
+          secure: process.env.SMTP_SECURE === 'true',
+          auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+          connectionTimeout: 10000,
+        };
+
+    const transport = nodemailer.createTransport(transportConfig);
+    const info = await transport.sendMail({
+      from: process.env.SMTP_FROM || process.env.SMTP_USER,
+      to: email,
+      subject,
+      text,
+      html,
     });
-    await transport.sendMail({ from: process.env.SMTP_FROM || process.env.SMTP_USER, to: email, subject, text, html });
+    console.log(`[Email Service] OTP successfully delivered to ${email}. MessageId: ${info.messageId}`);
   } catch (err) {
-    console.error(`[Email Service Error] Failed to send email to ${email}:`, err.message);
+    console.error(`[Email Service Error] Failed to send email to ${email}:`, err.message || err);
   }
 };
 
