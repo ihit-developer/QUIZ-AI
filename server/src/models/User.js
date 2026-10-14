@@ -81,6 +81,9 @@ const userSchema = new mongoose.Schema(
 
 userSchema.pre('save', async function () {
   if (!this.isModified('password')) return;
+  // Verification supplies a bcrypt hash from the short-lived pending record.
+  // Keep that hash intact instead of hashing it for a second time.
+  if (/^\$2[aby]\$\d{2}\$/.test(this.password)) return;
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
 });

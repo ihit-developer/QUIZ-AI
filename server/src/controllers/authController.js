@@ -21,8 +21,10 @@ const memoryUsers = new Map();
 const pendingRegistrations = new Map();
 const createOtp = () => String(Math.floor(100000 + Math.random() * 900000));
 const otpExpiry = () => new Date(Date.now() + 10 * 60 * 1000);
+const normalizeEmail = (email = '') => String(email).trim().toLowerCase();
 const findUserByEmail = async (email, select = '') => {
-  try { return await User.findOne({ email }).select(select); } catch { return memoryUsers.get(email); }
+  const normalizedEmail = normalizeEmail(email);
+  try { return await User.findOne({ email: normalizedEmail }).select(select); } catch { return memoryUsers.get(normalizedEmail); }
 };
 const publicUser = (user) => ({ id: user._id || user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar || '', bio: user.bio || '' });
 const publicAppUrl = (req) => `${req.protocol}://${req.get('host')}`;
@@ -56,7 +58,8 @@ initDemoUsers();
 
 const register = async (req, res, next) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, password, role } = req.body;
+    const email = normalizeEmail(req.body.email);
 
     let existingUser = null;
     try {
@@ -99,7 +102,8 @@ const register = async (req, res, next) => {
 
 const login = async (req, res, next) => {
   try {
-    const { email, password } = req.body;
+    const { password } = req.body;
+    const email = normalizeEmail(req.body.email);
     let user = null;
 
     try {
@@ -230,7 +234,8 @@ const refreshToken = async (req, res, next) => {
 
 const verifyEmail = async (req, res, next) => {
   try {
-    const { email, code } = req.body;
+    const { code } = req.body;
+    const email = normalizeEmail(req.body.email);
     let pending;
     try { pending = await PendingRegistration.findOne({ email }).select('+passwordHash +code'); } catch { pending = pendingRegistrations.get(email); }
     if (!pending || pending.code !== code || new Date(pending.expiresAt) < new Date()) {
@@ -238,9 +243,9 @@ const verifyEmail = async (req, res, next) => {
     }
     let user;
     try {
-      user = await User.create({ name: pending.name, email: pending.email, password: 'temporary-password', role: pending.role, isEmailVerified: true });
-      await User.updateOne({ _id: user._id }, { password: pending.passwordHash });
-      user.password = pending.passwordHash;
+      // Store the verified password hash atomically. The old temporary-password
+      // flow could leave a temporary password in MongoDB after a partial error.
+      user = await User.create({ name: pending.name, email: pending.email, password: pending.passwordHash, role: pending.role, isEmailVerified: true });
       await PendingRegistration.deleteOne({ _id: pending._id });
     } catch {
       user = { id: 'user_' + Date.now(), _id: 'user_' + Date.now(), name: pending.name, email: pending.email, password: pending.passwordHash, role: pending.role, isEmailVerified: true, bio: '', avatar: '' };
@@ -254,8 +259,9 @@ const verifyEmail = async (req, res, next) => {
 
 const resendVerification = async (req, res, next) => {
   try {
+    const email = normalizeEmail(req.body.email);
     let pending;
-    try { pending = await PendingRegistration.findOne({ email: req.body.email }).select('+code'); } catch { pending = pendingRegistrations.get(req.body.email); }
+    try { pending = await PendingRegistration.findOne({ email }).select('+code'); } catch { pending = pendingRegistrations.get(email); }
     if (!pending) return res.status(404).json({ success: false, message: 'No pending registration exists for that email.' });
     const code = createOtp(); pending.code = code; pending.expiresAt = otpExpiry(); if (pending.save) await pending.save();
     await sendOtpEmail({ email: pending.email, code, purpose: 'verification', name: pending.name });
@@ -265,7 +271,7 @@ const resendVerification = async (req, res, next) => {
 
 const forgotPassword = async (req, res, next) => {
   try {
-    const user = await findUserByEmail(req.body.email, '+passwordResetCode +passwordResetExpires');
+    const user = await findUserByEmail(normalizeEmail(req.body.email), '+passwordResetCode +passwordResetExpires');
     if (!user) return res.json({ success: true, message: 'If that email exists, a reset code has been sent.' });
     const code = createOtp(); user.passwordResetCode = code; user.passwordResetExpires = otpExpiry();
     if (user.save) await user.save();
@@ -276,7 +282,8 @@ const forgotPassword = async (req, res, next) => {
 
 const resetPassword = async (req, res, next) => {
   try {
-    const { email, code, newPassword } = req.body;
+    const { code, newPassword } = req.body;
+    const email = normalizeEmail(req.body.email);
     const user = await findUserByEmail(email, '+password +passwordResetCode +passwordResetExpires');
     if (!user || user.passwordResetCode !== code || !user.passwordResetExpires || new Date(user.passwordResetExpires) < new Date()) return res.status(400).json({ success: false, message: 'This reset code is invalid or expired.' });
     if (user.save) { user.password = newPassword; user.passwordResetCode = undefined; user.passwordResetExpires = undefined; await user.save(); }
