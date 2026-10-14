@@ -202,7 +202,9 @@ const getMyQuizzes = async (req, res, next) => {
     if (req.user.role === 'participant') {
       try {
         const Attempt = require('../models/Attempt');
-        const attempts = await Attempt.find({ userId }).populate('quizId');
+        const attempts = await Attempt.find({ userId, status: { $in: ['submitted', 'timed_out'] } })
+          .populate('quizId')
+          .sort({ submittedAt: -1, createdAt: -1 });
         quizzes = attempts
           .filter((a) => a.quizId)
           .map((a) => ({

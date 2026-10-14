@@ -13,10 +13,13 @@ class LiveSessionManager {
 
   // Helper: Persist participant quiz attempt into database on finish
   async saveFinalAttempts(room) {
-    if (!room || !room.quizId || !room.participants) return;
+    if (!room || !room.quizId || !room.participants || room.attemptsSaved || room.isFinalizing) return;
+    room.isFinalizing = true;
 
     const Attempt = require('../models/Attempt');
     const Quiz = require('../models/Quiz');
+    const { memoryAttempts } = require('../controllers/attemptController');
+    const quizId = room.quizId?._id || room.quizId;
     const totalPointsPossible = (room.questions || []).reduce((acc, q) => acc + (q.points || 10), 0) || 10;
 
     for (const [, p] of room.participants.entries()) {
@@ -26,8 +29,8 @@ class LiveSessionManager {
         const passed = percentage >= (room.passingScorePercent || 60);
 
         const attemptDoc = {
-          quizId: room.quizId,
-          userId: p.userId || null,
+          quizId,
+          userId: p.userId?._id || p.userId || null,
           guestSession: p.userId ? null : { name: p.name, guestId: 'guest_' + Math.random().toString(36).substring(2, 8) },
           score,
           percentage,
@@ -38,7 +41,7 @@ class LiveSessionManager {
           submittedAt: new Date(),
           durationSeconds: room.startedAt ? Math.round((Date.now() - room.startedAt.getTime()) / 1000) : 60,
           answers: (p.answers || []).map((ans) => ({
-            questionId: ans.questionId,
+            questionId: ans.questionId?._id || ans.questionId,
             selectedOptions: [ans.selectedText || ''],
             isCorrect: Boolean(ans.isCorrect),
             pointsAwarded: ans.pointsAwarded || 0,
@@ -55,12 +58,36 @@ class LiveSessionManager {
         p.passed = passed;
       } catch (err) {
         console.error(`[Live Session] Error saving attempt for participant ${p.name}:`, err.message);
+        // Keep localhost usable when MongoDB is temporarily offline. Production
+        // databases should be fixed using the logged error, rather than losing
+        // the participant result silently.
+        const fallbackId = `live_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        memoryAttempts.set(fallbackId, {
+          id: fallbackId,
+          _id: fallbackId,
+          quizId,
+          userId: p.userId?._id || p.userId || null,
+          guestSession: p.userId ? null : { name: p.name, guestId: `guest_${Math.random().toString(36).slice(2, 8)}` },
+          score: p.score || 0,
+          percentage: Math.round(((p.score || 0) / totalPointsPossible) * 100),
+          totalPointsPossible,
+          passed: false,
+          status: 'submitted',
+          startedAt: room.startedAt || new Date(),
+          submittedAt: new Date(),
+          durationSeconds: room.startedAt ? Math.round((Date.now() - new Date(room.startedAt).getTime()) / 1000) : 60,
+          answers: p.answers || [],
+        });
+        p.savedAttemptId = fallbackId;
       }
     }
 
+    room.attemptsSaved = true;
+    room.isFinalizing = false;
+
     // Mark quiz as closed in database so ended quiz cannot be started again
     try {
-      await Quiz.findByIdAndUpdate(room.quizId, { status: 'closed' });
+      await Quiz.findByIdAndUpdate(quizId, { status: 'closed' });
     } catch (err) {
       console.error('[Live Session] Error updating quiz status to closed:', err.message);
     }
@@ -256,6 +283,7 @@ class LiveSessionManager {
             } else {
               room.status = 'ended';
               await this.saveFinalAttempts(room);
+              await liveRoomStore.set(code, room);
               const finalLeaderboard = Array.from(room.participants.values())
                 .sort((a, b) => b.score - a.score)
                 .map((p) => ({
@@ -387,6 +415,7 @@ class LiveSessionManager {
               } else {
                 room.status = 'ended';
                 await this.saveFinalAttempts(room);
+                await liveRoomStore.set(code, room);
                 const finalLeaderboard = Array.from(room.participants.values())
                   .sort((a, b) => b.score - a.score)
                   .map((p) => ({
@@ -427,7 +456,7 @@ class LiveSessionManager {
       // 6. Host finishes quiz (Permanent End - Saves attempts & prevents restarting)
       socket.on('host:finish-quiz', async ({ roomCode }) => {
         const code = roomCode.toUpperCase();
-        const room = this.rooms.get(code);
+        const room = await liveRoomStore.get(code) || this.rooms.get(code);
         if (room) {
           if (room.timerInterval) {
             clearInterval(room.timerInterval);
@@ -436,6 +465,7 @@ class LiveSessionManager {
           room.status = 'ended';
           await liveRoomStore.set(code, room);
           await this.saveFinalAttempts(room);
+          await liveRoomStore.set(code, room);
 
           const finalLeaderboard = Array.from(room.participants.values())
             .sort((a, b) => b.score - a.score)
