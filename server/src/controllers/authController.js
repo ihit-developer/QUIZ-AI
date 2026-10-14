@@ -8,11 +8,12 @@ const {
   signRefreshToken,
   verifyRefreshToken,
 } = require('../utils/token');
+const isProductionDeployment = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
 
 // Cookie options for production and dev
 const cookieOptions = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
+  secure: isProductionDeployment,
   sameSite: 'lax',
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
 };
@@ -25,7 +26,7 @@ const otpExpiry = () => new Date(Date.now() + 10 * 60 * 1000);
 const normalizeEmail = (email = '') => String(email).trim().toLowerCase();
 const requirePersistentAuthDatabase = async () => {
   const available = await connectDB();
-  if (process.env.NODE_ENV === 'production' && !available) {
+  if (isProductionDeployment && !available) {
     const error = new Error('Account service is temporarily unavailable. Please try again shortly.');
     error.statusCode = 503;
     throw error;
@@ -36,7 +37,7 @@ const findUserByEmail = async (email, select = '') => {
   const normalizedEmail = normalizeEmail(email);
   try { return await User.findOne({ email: normalizedEmail }).select(select); }
   catch (error) {
-    if (process.env.NODE_ENV === 'production') throw error;
+    if (isProductionDeployment) throw error;
     return memoryUsers.get(normalizedEmail);
   }
 };
@@ -44,7 +45,7 @@ const publicUser = (user) => ({ id: user._id || user.id, name: user.name, email:
 const publicAppUrl = (req) => `${req.protocol}://${req.get('host')}`;
 const googleRedirectUri = (req) => {
   const requestCallback = `${publicAppUrl(req)}/api/v1/auth/google/callback`;
-  return process.env.NODE_ENV === 'production'
+  return isProductionDeployment
     ? (process.env.GOOGLE_REDIRECT_URI || requestCallback)
     : requestCallback;
 };
@@ -80,7 +81,7 @@ const register = async (req, res, next) => {
     try {
       existingUser = await User.findOne({ email });
     } catch (error) {
-      if (process.env.NODE_ENV === 'production') throw error;
+      if (isProductionDeployment) throw error;
       existingUser = memoryUsers.get(email);
     }
 
@@ -102,7 +103,7 @@ const register = async (req, res, next) => {
     try {
       await PendingRegistration.findOneAndUpdate({ email }, pending, { upsert: true, new: true, setDefaultsOnInsert: true });
     } catch (error) {
-      if (process.env.NODE_ENV === 'production') throw error;
+      if (isProductionDeployment) throw error;
       pendingRegistrations.set(email, pending);
     }
     await sendOtpEmail({ email, code, purpose: 'verification', name });
@@ -127,11 +128,11 @@ const login = async (req, res, next) => {
     try {
       user = await User.findOne({ email }).select('+password');
     } catch (error) {
-      if (process.env.NODE_ENV === 'production') throw error;
+      if (isProductionDeployment) throw error;
       user = memoryUsers.get(email);
     }
 
-    if (!user && process.env.NODE_ENV !== 'production') {
+    if (!user && !isProductionDeployment) {
       user = memoryUsers.get(email);
     }
 
@@ -259,7 +260,7 @@ const verifyEmail = async (req, res, next) => {
     let pending;
     try { pending = await PendingRegistration.findOne({ email }).select('+passwordHash +code'); }
     catch (error) {
-      if (process.env.NODE_ENV === 'production') throw error;
+      if (isProductionDeployment) throw error;
       pending = pendingRegistrations.get(email);
     }
     if (!pending || pending.code !== code || new Date(pending.expiresAt) < new Date()) {
@@ -275,7 +276,7 @@ const verifyEmail = async (req, res, next) => {
       try { await PendingRegistration.deleteOne({ _id: pending._id }); }
       catch (cleanupError) { console.error('[Auth] Unable to remove consumed verification code:', cleanupError.message); }
     } catch (error) {
-      if (process.env.NODE_ENV === 'production') throw error;
+      if (isProductionDeployment) throw error;
       user = { id: 'user_' + Date.now(), _id: 'user_' + Date.now(), name: pending.name, email: pending.email, password: pending.passwordHash, role: pending.role, isEmailVerified: true, bio: '', avatar: '' };
       memoryUsers.set(email, user); pendingRegistrations.delete(email);
     }
@@ -348,7 +349,7 @@ const googleCallback = async (req, res, next) => {
     await requirePersistentAuthDatabase();
     // Locally the React app (5173) and API (5000) are separate. On Vercel
     // they intentionally share one public domain.
-    const clientUrl = process.env.NODE_ENV === 'production'
+    const clientUrl = isProductionDeployment
       ? publicAppUrl(req)
       : (process.env.CLIENT_URL || 'http://localhost:5173');
     const redirectUri = googleRedirectUri(req);
