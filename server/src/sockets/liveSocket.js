@@ -19,7 +19,7 @@ class LiveSessionManager {
     const Attempt = require('../models/Attempt');
     const Quiz = require('../models/Quiz');
     const { memoryAttempts } = require('../controllers/attemptController');
-    const quizId = room.quizId?._id || room.quizId;
+    const quizId = room.quizId?._id || room.quizId?.id || room.quizId;
     const totalPointsPossible = (room.questions || []).reduce((acc, q) => acc + (q.points || 10), 0) || 10;
 
     for (const [, p] of room.participants.entries()) {
@@ -41,7 +41,9 @@ class LiveSessionManager {
           submittedAt: new Date(),
           durationSeconds: room.startedAt ? Math.round((Date.now() - room.startedAt.getTime()) / 1000) : 60,
           answers: (p.answers || []).map((ans) => ({
-            questionId: ans.questionId?._id || ans.questionId,
+            // Redis serialization uses `id` (not `_id`) for Mongoose
+            // documents. Preserve either form so live attempts validate.
+            questionId: ans.questionId?._id || ans.questionId?.id || ans.questionId,
             selectedOptions: [ans.selectedText || ''],
             isCorrect: Boolean(ans.isCorrect),
             pointsAwarded: ans.pointsAwarded || 0,
@@ -361,7 +363,9 @@ class LiveSessionManager {
 
           const currentQ = room.questions[room.currentQuestionIdx];
           participant.answers.push({
-            questionId: currentQ ? currentQ._id : null,
+            // A room restored from Redis has `id`; an in-memory Mongoose
+            // question has `_id`. Supporting both prevents rejected attempts.
+            questionId: currentQ?._id || currentQ?.id || null,
             selectedText: selectedOptionText || '',
             isCorrect: Boolean(isCorrect),
             pointsAwarded: pts,
