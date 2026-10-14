@@ -25,6 +25,7 @@ import { Badge } from '../../components/ui/Badge';
 import { TimerRing } from '../../components/ui/TimerRing';
 import { PartyPopperBoom } from '../../components/quiz/PartyPopperBoom';
 import toast from 'react-hot-toast';
+import confetti from 'canvas-confetti';
 
 export const LiveRoom = () => {
   const { code = 'JS8821' } = useParams();
@@ -49,6 +50,11 @@ export const LiveRoom = () => {
 
   const [questionTimer, setQuestionTimer] = useState({ secondsLeft: 30, totalSeconds: 30 });
   const [submissionStats, setSubmissionStats] = useState({ submittedCount: 0, totalParticipants: 0 });
+  const launchSprinkles = useCallback((count = 18) => {
+    try {
+      confetti({ particleCount: count, spread: 36, startVelocity: 18, scalar: 0.62, gravity: 1.12, origin: { x: 0.5, y: 0.72 }, colors: ['#f43f5e', '#fb7185', '#fbbf24', '#34d399', '#60a5fa'] });
+    } catch {}
+  }, []);
 
   // isHost is computed from quizInfo state for rendering purposes
   const isHost = Boolean(
@@ -119,7 +125,7 @@ export const LiveRoom = () => {
       setHasAnsweredCurrent(false);
       setAnswerResult(null);
       setSubmissionStats({ submittedCount: 0, totalParticipants: 0 });
-      soundManager.resumeAudio().then(() => soundManager.startQuizBGM()).catch(() => {});
+      soundManager.resumeAudio().then(() => soundManager.startLiveArenaBGM()).catch(() => {});
       toast.success('🚀 Quiz started! Good luck!');
     };
 
@@ -134,6 +140,7 @@ export const LiveRoom = () => {
       setHasAnsweredCurrent(false);
       setAnswerResult(null);
       setSubmissionStats({ submittedCount: 0, totalParticipants: 0 });
+      launchSprinkles(10);
     };
 
     const onLeaderboardUpdated = (data) => {
@@ -147,8 +154,15 @@ export const LiveRoom = () => {
     };
 
     const onAnswerConfirmed = (data) => {
-      setAnswerResult(data.isCorrect ? 'correct' : 'wrong');
+      const isCorrect = Boolean(data.isCorrect);
+      setAnswerResult(isCorrect ? 'correct' : 'wrong');
       setMyScore(data.currentScore || 0);
+      if (isCorrect) {
+        soundManager.playCorrect();
+        launchSprinkles();
+      } else {
+        soundManager.playIncorrect();
+      }
     };
 
     const onQuizEnded = (data) => {
@@ -191,11 +205,18 @@ export const LiveRoom = () => {
       soundManager.stopBGM();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [code]); // Only re-run if room code changes
+  }, [code, launchSprinkles]);
 
   const handleStartQuiz = () => {
+    soundManager.resumeAudio().then(() => soundManager.startLiveArenaBGM()).catch(() => {});
     const socket = getSocket();
     socket.emit('host:start-quiz', { roomCode: code.toUpperCase() });
+  };
+
+  const handleToggleSound = () => {
+    const muted = soundManager.toggleMute();
+    setIsMuted(muted);
+    if (!muted) soundManager.resumeAudio().then(() => soundManager.startLiveArenaBGM()).catch(() => {});
   };
 
   const handleNextQuestion = () => {
@@ -427,6 +448,15 @@ export const LiveRoom = () => {
 
             {/* Right: participant score pill OR host controls */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={handleToggleSound}
+                aria-label={isMuted ? 'Turn sound on' : 'Mute sound'}
+                title={isMuted ? 'Turn sound on' : 'Mute sound'}
+                style={{ border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', width: '36px', height: '36px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+              >
+                {isMuted ? <VolumeX size={17} /> : <Volume2 size={17} />}
+              </button>
               {!isHost && (
                 <div
                   style={{

@@ -10,6 +10,7 @@ import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import toast from 'react-hot-toast';
+import { soundManager } from '../../utils/soundManager';
 
 export const Join = () => {
   const { code: urlCode } = useParams();
@@ -84,6 +85,7 @@ export const Join = () => {
 
     // If quiz is Live mode — go directly to live room lobby, skip startAttempt
     if (quizPreview?.mode === 'live') {
+      soundManager.resumeAudio().catch(() => {});
       navigate(`/live/${code.trim().toUpperCase()}`);
       return;
     }

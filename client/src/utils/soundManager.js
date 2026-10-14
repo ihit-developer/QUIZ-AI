@@ -303,6 +303,12 @@ class SoundManager {
     this.notify();
   }
 
+  // Live Arena has a slightly fuller, but still gentle, background groove.
+  startLiveArenaBGM() {
+    this.setVolume(0.45);
+    this.startQuizBGM();
+  }
+
   toggleMute() {
     this.isMuted = !this.isMuted;
     if (this.isMuted) {
