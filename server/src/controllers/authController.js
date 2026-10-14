@@ -306,7 +306,11 @@ const googleLogin = (req, res) => {
 
 const googleCallback = async (req, res, next) => {
   try {
-    const clientUrl = publicAppUrl(req);
+    // Locally the React app (5173) and API (5000) are separate. On Vercel
+    // they intentionally share one public domain.
+    const clientUrl = process.env.NODE_ENV === 'production'
+      ? publicAppUrl(req)
+      : (process.env.CLIENT_URL || 'http://localhost:5173');
     const redirectUri = googleRedirectUri(req);
     const tokenResponse = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ code: req.query.code || '', client_id: process.env.GOOGLE_CLIENT_ID, client_secret: process.env.GOOGLE_CLIENT_SECRET, redirect_uri: redirectUri, grant_type: 'authorization_code' }) });
     const tokenData = await tokenResponse.json();
