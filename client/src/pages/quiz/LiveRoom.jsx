@@ -29,7 +29,7 @@ import confetti from 'canvas-confetti';
 
 export const LiveRoom = () => {
   const { code = 'JS8821' } = useParams();
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
 
   const [quizInfo, setQuizInfo] = useState(null);
@@ -66,6 +66,10 @@ export const LiveRoom = () => {
   // Run socket setup ONCE when room code changes — not when isHost changes
   // (isHost changes after quizInfo loads and would cause duplicate listeners)
   useEffect(() => {
+    // A Google redirect restores its session asynchronously. Do not join before
+    // that finishes or this signed-in participant is saved as a guest.
+    if (authLoading) return undefined;
+
     const socket = getSocket();
     const roomCode = code.toUpperCase();
 
@@ -204,8 +208,7 @@ export const LiveRoom = () => {
       socket.off('error', onRoomError);
       soundManager.stopBGM();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [code, launchSprinkles]);
+  }, [code, launchSprinkles, authLoading, user]);
 
   const handleStartQuiz = () => {
     soundManager.resumeAudio().then(() => soundManager.startLiveArenaBGM()).catch(() => {});
