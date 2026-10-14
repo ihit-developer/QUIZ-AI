@@ -55,6 +55,7 @@ export const Dashboard = () => {
 
   useEffect(() => {
     const loadDashboard = async () => {
+      setLoading(true);
       try {
         const [quizRes, predRes] = await Promise.all([
           quizService.getMyQuizzes().catch(() => ({ success: false })),
@@ -72,7 +73,7 @@ export const Dashboard = () => {
       }
     };
     loadDashboard();
-  }, []);
+  }, [user?.id, user?._id]);
 
   if (loading) {
     return <PageSkeletonLoader />;
@@ -263,6 +264,13 @@ export const Dashboard = () => {
                         <Clock size={14} /> {quiz.settings?.timeLimitMinutes || 15} Mins
                       </span>
                     </div>
+
+                    {!isHost && quiz.attemptStatus && (
+                      <div style={{ marginTop: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.6rem', padding: '0.7rem 0.8rem', borderRadius: '0.7rem', background: quiz.attemptPassed ? 'rgba(16, 185, 129, 0.1)' : 'var(--surface)', border: `1px solid ${quiz.attemptPassed ? 'rgba(16, 185, 129, 0.35)' : 'var(--border)'}` }}>
+                        <span style={{ fontWeight: 800, color: 'var(--text)' }}>Your result</span>
+                        <span style={{ fontWeight: 900, color: quiz.attemptPassed ? '#059669' : 'var(--primary)' }}>{Math.round(quiz.attemptPercentage || 0)}%</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Action Buttons */}
@@ -292,6 +300,16 @@ export const Dashboard = () => {
                           style={{ padding: '0.45rem 0.85rem', fontSize: '0.82rem', minHeight: '34px' }}
                         >
                           Edit Quiz
+                        </Link>
+                      )}
+
+                      {!isHost && quiz.attemptId && (
+                        <Link
+                          to={`/results/${quiz.attemptId}`}
+                          className="btn-secondary"
+                          style={{ padding: '0.45rem 0.85rem', fontSize: '0.82rem', minHeight: '34px' }}
+                        >
+                          View Result
                         </Link>
                       )}
 

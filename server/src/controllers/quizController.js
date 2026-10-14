@@ -209,10 +209,13 @@ const getMyQuizzes = async (req, res, next) => {
           .filter((a) => a.quizId)
           .map((a) => ({
             ...a.quizId.toObject(),
+            attemptId: a._id,
             attemptScore: a.score,
             attemptPercentage: a.percentage,
             attemptPassed: a.passed,
             attemptStatus: a.status,
+            attemptSubmittedAt: a.submittedAt,
+            attemptDurationSeconds: a.durationSeconds,
           }));
       } catch {
         quizzes = [];
