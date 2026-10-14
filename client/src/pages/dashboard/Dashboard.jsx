@@ -82,7 +82,7 @@ export const Dashboard = () => {
   const isHost = user?.role === 'host';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+    <div className="app-page dashboard-page" style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
       {/* 1. Welcome Banner */}
       <Card
         style={{

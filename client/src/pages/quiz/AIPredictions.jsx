@@ -85,7 +85,7 @@ export const AIPredictions = () => {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+    <div className="app-page insights-page" style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
       {/* Top Banner */}
       <Card
         style={{

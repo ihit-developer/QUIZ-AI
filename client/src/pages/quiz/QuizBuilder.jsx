@@ -307,7 +307,7 @@ export const QuizBuilder = () => {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+    <div className="app-page builder-page" style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
       {/* Top Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
         <div>

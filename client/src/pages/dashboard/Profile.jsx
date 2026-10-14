@@ -75,7 +75,7 @@ export const Profile = () => {
   };
 
   return (
-    <div style={{ maxWidth: '680px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+    <div className="app-page profile-page" style={{ maxWidth: '760px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       <Card style={{ padding: '2.5rem' }}>
         <Badge variant="primary" style={{ marginBottom: '0.65rem' }}>
           ACCOUNT PREFERENCES
