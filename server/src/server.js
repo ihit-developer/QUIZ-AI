@@ -20,7 +20,10 @@ const predictionRoutes = require('./routes/predictionRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 
 const app = express();
-app.enable('trust proxy');
+// Vercel places one trusted proxy in front of the app. Locally there is no
+// proxy. Never use `true` here: it lets clients spoof their IP and bypass the
+// rate limiter.
+app.set('trust proxy', process.env.NODE_ENV === 'production' ? 1 : false);
 const server = http.createServer(app);
 
 // Initialize Socket.io
