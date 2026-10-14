@@ -5,7 +5,7 @@ const isLocalDevelopment = typeof window !== 'undefined' &&
 
 // Local Vite (5173) and Express (5000) run on separate ports. On Vercel both
 // services share one domain, so API calls must stay on the current origin.
-const apiBaseUrl = import.meta.env.VITE_API_URL ||
+export const apiBaseUrl = import.meta.env.VITE_API_URL ||
   (isLocalDevelopment ? 'http://localhost:5000/api/v1' :
     (typeof window !== 'undefined' ? `${window.location.origin}/api/v1` : 'http://localhost:5000/api/v1'));
 

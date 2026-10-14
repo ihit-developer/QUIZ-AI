@@ -25,6 +25,13 @@ const findUserByEmail = async (email, select = '') => {
   try { return await User.findOne({ email }).select(select); } catch { return memoryUsers.get(email); }
 };
 const publicUser = (user) => ({ id: user._id || user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar || '', bio: user.bio || '' });
+const publicAppUrl = (req) => `${req.protocol}://${req.get('host')}`;
+const googleRedirectUri = (req) => {
+  const requestCallback = `${publicAppUrl(req)}/api/v1/auth/google/callback`;
+  return process.env.NODE_ENV === 'production'
+    ? (process.env.GOOGLE_REDIRECT_URI || requestCallback)
+    : requestCallback;
+};
 
 // Helper to seed initial admin account
 const initDemoUsers = async () => {
@@ -292,15 +299,15 @@ const changePassword = async (req, res, next) => {
 
 const googleLogin = (req, res) => {
   if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) return res.status(503).json({ success: false, message: 'Google sign-in has not been configured yet.' });
-  const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${req.protocol}://${req.get('host')}/api/v1/auth/google/callback`;
+  const redirectUri = googleRedirectUri(req);
   const query = new URLSearchParams({ client_id: process.env.GOOGLE_CLIENT_ID, redirect_uri: redirectUri, response_type: 'code', scope: 'openid email profile', access_type: 'online', prompt: 'select_account' });
   res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${query}`);
 };
 
 const googleCallback = async (req, res, next) => {
   try {
-    const clientUrl = process.env.CLIENT_SERVICE_URL || process.env.CLIENT_URL || 'http://localhost:5173';
-    const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${req.protocol}://${req.get('host')}/api/v1/auth/google/callback`;
+    const clientUrl = publicAppUrl(req);
+    const redirectUri = googleRedirectUri(req);
     const tokenResponse = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ code: req.query.code || '', client_id: process.env.GOOGLE_CLIENT_ID, client_secret: process.env.GOOGLE_CLIENT_SECRET, redirect_uri: redirectUri, grant_type: 'authorization_code' }) });
     const tokenData = await tokenResponse.json();
     if (!tokenResponse.ok) throw new Error(tokenData.error_description || 'Google token exchange failed');

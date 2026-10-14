@@ -24,7 +24,7 @@ app.enable('trust proxy');
 const server = http.createServer(app);
 
 // Initialize Socket.io
-const clientOrigin = process.env.CLIENT_SERVICE_URL || process.env.CLIENT_URL || 'http://localhost:5173';
+const clientOrigin = process.env.CLIENT_URL || 'http://localhost:5173';
 
 const io = new Server(server, {
   cors: {
@@ -53,7 +53,6 @@ const allowedOrigins = [
   'http://localhost:5174',
   'http://localhost:3000',
   process.env.CLIENT_URL,
-  process.env.CLIENT_SERVICE_URL,
 ].filter(Boolean);
 
 app.use(
