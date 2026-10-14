@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const PendingRegistration = require('../models/PendingRegistration');
+const crypto = require('crypto');
 const connectDB = require('../config/db');
 const { sendOtpEmail, sendLoginAlert } = require('../services/emailService');
 const { writeAuditLog } = require('../services/auditService');
@@ -24,6 +25,22 @@ const pendingRegistrations = new Map();
 const createOtp = () => String(Math.floor(100000 + Math.random() * 900000));
 const otpExpiry = () => new Date(Date.now() + 10 * 60 * 1000);
 const normalizeEmail = (email = '') => String(email).trim().toLowerCase();
+const googleStateSecret = () => process.env.JWT_ACCESS_SECRET || 'development-google-state-secret';
+const createGoogleState = (role) => {
+  const payload = Buffer.from(JSON.stringify({ role, expiresAt: Date.now() + 10 * 60 * 1000 })).toString('base64url');
+  const signature = crypto.createHmac('sha256', googleStateSecret()).update(payload).digest('base64url');
+  return `${payload}.${signature}`;
+};
+const readGoogleStateRole = (state) => {
+  if (!state || typeof state !== 'string') return 'participant';
+  const [payload, signature] = state.split('.');
+  const expected = crypto.createHmac('sha256', googleStateSecret()).update(payload || '').digest('base64url');
+  if (!payload || !signature || signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return 'participant';
+  try {
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    return data.expiresAt > Date.now() && ['host', 'participant'].includes(data.role) ? data.role : 'participant';
+  } catch { return 'participant'; }
+};
 const requirePersistentAuthDatabase = async () => {
   const available = await connectDB();
   if (isProductionDeployment && !available) {
@@ -340,7 +357,8 @@ const changePassword = async (req, res, next) => {
 const googleLogin = (req, res) => {
   if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) return res.status(503).json({ success: false, message: 'Google sign-in has not been configured yet.' });
   const redirectUri = googleRedirectUri(req);
-  const query = new URLSearchParams({ client_id: process.env.GOOGLE_CLIENT_ID, redirect_uri: redirectUri, response_type: 'code', scope: 'openid email profile', access_type: 'online', prompt: 'select_account' });
+  const requestedRole = ['host', 'participant'].includes(req.query.role) ? req.query.role : 'participant';
+  const query = new URLSearchParams({ client_id: process.env.GOOGLE_CLIENT_ID, redirect_uri: redirectUri, response_type: 'code', scope: 'openid email profile', access_type: 'online', prompt: 'select_account', state: createGoogleState(requestedRole) });
   res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${query}`);
 };
 
@@ -359,11 +377,12 @@ const googleCallback = async (req, res, next) => {
     const profileResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { Authorization: `Bearer ${tokenData.access_token}` } });
     const profile = await profileResponse.json();
     if (!profileResponse.ok || !profile.email_verified) throw new Error('Google did not provide a verified email address');
+    const requestedRole = readGoogleStateRole(req.query.state);
     let user;
     try { user = await User.findOne({ $or: [{ googleId: profile.sub }, { email: profile.email }] }); } catch { user = memoryUsers.get(profile.email); }
     if (!user) {
-      try { user = await User.create({ name: profile.name || profile.email.split('@')[0], email: profile.email, password: `google-${createOtp()}-${Date.now()}`, role: 'participant', googleId: profile.sub, isEmailVerified: true, avatar: profile.picture || '' }); }
-      catch { user = { id: `google_${Date.now()}`, _id: `google_${Date.now()}`, name: profile.name || profile.email.split('@')[0], email: profile.email, password: '', role: 'participant', googleId: profile.sub, isEmailVerified: true, avatar: profile.picture || '', bio: '' }; memoryUsers.set(profile.email, user); }
+      try { user = await User.create({ name: profile.name || profile.email.split('@')[0], email: profile.email, password: `google-${createOtp()}-${Date.now()}`, role: requestedRole, googleId: profile.sub, isEmailVerified: true, avatar: profile.picture || '' }); }
+      catch { user = { id: `google_${Date.now()}`, _id: `google_${Date.now()}`, name: profile.name || profile.email.split('@')[0], email: profile.email, password: '', role: requestedRole, googleId: profile.sub, isEmailVerified: true, avatar: profile.picture || '', bio: '' }; memoryUsers.set(profile.email, user); }
     } else if (!user.googleId) { user.googleId = profile.sub; if (user.save) await user.save(); }
     const accessToken = signAccessToken(user);
     res.cookie('refreshToken', signRefreshToken(user), cookieOptions);
