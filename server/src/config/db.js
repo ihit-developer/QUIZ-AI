@@ -4,7 +4,7 @@ let isConnected = false;
 
 const connectDB = async () => {
   if (isConnected && mongoose.connection.readyState === 1) {
-    return;
+    return true;
   }
 
   try {
@@ -16,9 +16,13 @@ const connectDB = async () => {
     });
     isConnected = db.connections[0].readyState === 1;
     console.log(`[Database] MongoDB Connected: ${db.connection.host}`);
+    return isConnected;
   } catch (error) {
-    console.warn(`[Database Warning] Could not connect to MongoDB at ${process.env.MONGO_URI}: ${error.message}`);
+    isConnected = false;
+    // Do not print the connection string: it contains database credentials.
+    console.warn(`[Database Warning] Could not connect to MongoDB: ${error.message}`);
     console.warn('[Database Warning] Continuing in development/offline-fallback mode if DB is unavailable.');
+    return false;
   }
 };
 

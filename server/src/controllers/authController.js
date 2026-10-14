@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const PendingRegistration = require('../models/PendingRegistration');
+const connectDB = require('../config/db');
 const { sendOtpEmail, sendLoginAlert } = require('../services/emailService');
 const { writeAuditLog } = require('../services/auditService');
 const {
@@ -22,9 +23,22 @@ const pendingRegistrations = new Map();
 const createOtp = () => String(Math.floor(100000 + Math.random() * 900000));
 const otpExpiry = () => new Date(Date.now() + 10 * 60 * 1000);
 const normalizeEmail = (email = '') => String(email).trim().toLowerCase();
+const requirePersistentAuthDatabase = async () => {
+  const available = await connectDB();
+  if (process.env.NODE_ENV === 'production' && !available) {
+    const error = new Error('Account service is temporarily unavailable. Please try again shortly.');
+    error.statusCode = 503;
+    throw error;
+  }
+  return available;
+};
 const findUserByEmail = async (email, select = '') => {
   const normalizedEmail = normalizeEmail(email);
-  try { return await User.findOne({ email: normalizedEmail }).select(select); } catch { return memoryUsers.get(normalizedEmail); }
+  try { return await User.findOne({ email: normalizedEmail }).select(select); }
+  catch (error) {
+    if (process.env.NODE_ENV === 'production') throw error;
+    return memoryUsers.get(normalizedEmail);
+  }
 };
 const publicUser = (user) => ({ id: user._id || user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar || '', bio: user.bio || '' });
 const publicAppUrl = (req) => `${req.protocol}://${req.get('host')}`;
@@ -58,13 +72,15 @@ initDemoUsers();
 
 const register = async (req, res, next) => {
   try {
+    await requirePersistentAuthDatabase();
     const { name, password, role } = req.body;
     const email = normalizeEmail(req.body.email);
 
     let existingUser = null;
     try {
       existingUser = await User.findOne({ email });
-    } catch {
+    } catch (error) {
+      if (process.env.NODE_ENV === 'production') throw error;
       existingUser = memoryUsers.get(email);
     }
 
@@ -85,7 +101,8 @@ const register = async (req, res, next) => {
     const pending = { name, email, passwordHash: await require('bcryptjs').hash(password, 10), role: role || 'participant', code, expiresAt: otpExpiry() };
     try {
       await PendingRegistration.findOneAndUpdate({ email }, pending, { upsert: true, new: true, setDefaultsOnInsert: true });
-    } catch {
+    } catch (error) {
+      if (process.env.NODE_ENV === 'production') throw error;
       pendingRegistrations.set(email, pending);
     }
     await sendOtpEmail({ email, code, purpose: 'verification', name });
@@ -102,17 +119,19 @@ const register = async (req, res, next) => {
 
 const login = async (req, res, next) => {
   try {
+    await requirePersistentAuthDatabase();
     const { password } = req.body;
     const email = normalizeEmail(req.body.email);
     let user = null;
 
     try {
       user = await User.findOne({ email }).select('+password');
-    } catch {
+    } catch (error) {
+      if (process.env.NODE_ENV === 'production') throw error;
       user = memoryUsers.get(email);
     }
 
-    if (!user) {
+    if (!user && process.env.NODE_ENV !== 'production') {
       user = memoryUsers.get(email);
     }
 
@@ -234,10 +253,15 @@ const refreshToken = async (req, res, next) => {
 
 const verifyEmail = async (req, res, next) => {
   try {
+    await requirePersistentAuthDatabase();
     const { code } = req.body;
     const email = normalizeEmail(req.body.email);
     let pending;
-    try { pending = await PendingRegistration.findOne({ email }).select('+passwordHash +code'); } catch { pending = pendingRegistrations.get(email); }
+    try { pending = await PendingRegistration.findOne({ email }).select('+passwordHash +code'); }
+    catch (error) {
+      if (process.env.NODE_ENV === 'production') throw error;
+      pending = pendingRegistrations.get(email);
+    }
     if (!pending || pending.code !== code || new Date(pending.expiresAt) < new Date()) {
       return res.status(400).json({ success: false, message: 'This verification code is invalid or expired.' });
     }
@@ -246,8 +270,12 @@ const verifyEmail = async (req, res, next) => {
       // Store the verified password hash atomically. The old temporary-password
       // flow could leave a temporary password in MongoDB after a partial error.
       user = await User.create({ name: pending.name, email: pending.email, password: pending.passwordHash, role: pending.role, isEmailVerified: true });
-      await PendingRegistration.deleteOne({ _id: pending._id });
-    } catch {
+      // Deleting the consumed OTP is cleanup only. A cleanup failure must never
+      // replace a real saved user with an in-memory user.
+      try { await PendingRegistration.deleteOne({ _id: pending._id }); }
+      catch (cleanupError) { console.error('[Auth] Unable to remove consumed verification code:', cleanupError.message); }
+    } catch (error) {
+      if (process.env.NODE_ENV === 'production') throw error;
       user = { id: 'user_' + Date.now(), _id: 'user_' + Date.now(), name: pending.name, email: pending.email, password: pending.passwordHash, role: pending.role, isEmailVerified: true, bio: '', avatar: '' };
       memoryUsers.set(email, user); pendingRegistrations.delete(email);
     }
@@ -259,6 +287,7 @@ const verifyEmail = async (req, res, next) => {
 
 const resendVerification = async (req, res, next) => {
   try {
+    await requirePersistentAuthDatabase();
     const email = normalizeEmail(req.body.email);
     let pending;
     try { pending = await PendingRegistration.findOne({ email }).select('+code'); } catch { pending = pendingRegistrations.get(email); }
@@ -271,6 +300,7 @@ const resendVerification = async (req, res, next) => {
 
 const forgotPassword = async (req, res, next) => {
   try {
+    await requirePersistentAuthDatabase();
     const user = await findUserByEmail(normalizeEmail(req.body.email), '+passwordResetCode +passwordResetExpires');
     if (!user) return res.json({ success: true, message: 'If that email exists, a reset code has been sent.' });
     const code = createOtp(); user.passwordResetCode = code; user.passwordResetExpires = otpExpiry();
@@ -282,6 +312,7 @@ const forgotPassword = async (req, res, next) => {
 
 const resetPassword = async (req, res, next) => {
   try {
+    await requirePersistentAuthDatabase();
     const { code, newPassword } = req.body;
     const email = normalizeEmail(req.body.email);
     const user = await findUserByEmail(email, '+password +passwordResetCode +passwordResetExpires');
@@ -294,6 +325,7 @@ const resetPassword = async (req, res, next) => {
 
 const changePassword = async (req, res, next) => {
   try {
+    await requirePersistentAuthDatabase();
     const { currentPassword, newPassword } = req.body;
     let user = await findUserByEmail(req.user.email, '+password');
     const bcrypt = require('bcryptjs');
@@ -313,6 +345,7 @@ const googleLogin = (req, res) => {
 
 const googleCallback = async (req, res, next) => {
   try {
+    await requirePersistentAuthDatabase();
     // Locally the React app (5173) and API (5000) are separate. On Vercel
     // they intentionally share one public domain.
     const clientUrl = process.env.NODE_ENV === 'production'
