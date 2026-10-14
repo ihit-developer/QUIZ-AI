@@ -26,6 +26,12 @@
       }
     },
     {
+      "source": "/socket.io/(.*)",
+      "destination": {
+        "service": "server"
+      }
+    },
+    {
       "source": "/(.*)",
       "destination": {
         "service": "client"

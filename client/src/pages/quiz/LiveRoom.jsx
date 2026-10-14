@@ -158,6 +158,14 @@ export const LiveRoom = () => {
       soundManager.playPopperBoom();
     };
 
+    const onConnectError = () => {
+      toast.error('Unable to connect to the Live Arena. Please check your internet and try again.');
+    };
+
+    const onRoomError = (data) => {
+      toast.error(data?.message || 'The Live Arena could not complete that action.');
+    };
+
     socket.on('room:ended-lock', onRoomEndedLock);
     socket.on('lobby:updated', onLobbyUpdated);
     socket.on('quiz:started', onQuizStarted);
@@ -166,6 +174,8 @@ export const LiveRoom = () => {
     socket.on('leaderboard:updated', onLeaderboardUpdated);
     socket.on('participant:answer-confirmed', onAnswerConfirmed);
     socket.on('quiz:ended', onQuizEnded);
+    socket.on('connect_error', onConnectError);
+    socket.on('error', onRoomError);
 
     return () => {
       socket.off('room:ended-lock', onRoomEndedLock);
@@ -176,6 +186,8 @@ export const LiveRoom = () => {
       socket.off('leaderboard:updated', onLeaderboardUpdated);
       socket.off('participant:answer-confirmed', onAnswerConfirmed);
       socket.off('quiz:ended', onQuizEnded);
+      socket.off('connect_error', onConnectError);
+      socket.off('error', onRoomError);
       soundManager.stopBGM();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps

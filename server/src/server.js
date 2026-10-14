@@ -145,7 +145,9 @@ else {
   connectDB();
 }
 
-module.exports = app;
+// Export the HTTP server so Vercel can handle Socket.IO WebSocket upgrades.
+// The Express app remains available to local tools through `.app`.
+module.exports = server;
 module.exports.app = app;
 module.exports.server = server;
 module.exports.io = io;

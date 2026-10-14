@@ -8,9 +8,13 @@ let socket = null;
 export const getSocket = () => {
   if (!socket) {
     socket = io(SOCKET_URL, {
+      path: '/socket.io',
       withCredentials: true,
       transports: ['websocket', 'polling'],
       autoConnect: true,
+      timeout: 10000,
+      reconnection: true,
+      reconnectionAttempts: 5,
     });
   }
   return socket;

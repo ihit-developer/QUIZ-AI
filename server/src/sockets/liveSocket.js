@@ -286,6 +286,11 @@ class LiveSessionManager {
             return;
           }
 
+          if (!room.questions || room.questions.length === 0) {
+            socket.emit('error', { message: 'This quiz has no questions. Add questions before starting the Live Arena.' });
+            return;
+          }
+
           room.status = 'active';
           room.startedAt = new Date();
           room.currentQuestionIdx = 0;
