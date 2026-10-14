@@ -27,9 +27,12 @@ export const Navbar = () => {
         position: 'sticky',
         top: 0,
         zIndex: 50,
-        backgroundColor: 'var(--surface)',
+        backgroundColor: 'color-mix(in srgb, var(--surface) 90%, transparent)',
+        backdropFilter: 'blur(16px)',
+        WebkitBackdropFilter: 'blur(16px)',
         borderBottom: '1px solid var(--border)',
-        padding: '0.75rem 1.5rem',
+        padding: '0.85rem 1.5rem',
+        transition: 'background-color 0.2s ease, border-color 0.2s ease',
       }}
     >
       <div
@@ -49,31 +52,33 @@ export const Navbar = () => {
             alignItems: 'center',
             gap: '0.65rem',
             fontWeight: 900,
-            fontSize: '1.4rem',
-            letterSpacing: '-0.03em',
+            fontSize: '1.45rem',
+            letterSpacing: '-0.035em',
             color: 'var(--text)',
           }}
         >
           <div
             style={{
-              width: '38px',
-              height: '38px',
-              borderRadius: '10px',
-              backgroundColor: 'var(--primary)',
+              width: '40px',
+              height: '40px',
+              borderRadius: '12px',
+              background: 'linear-gradient(135deg, var(--primary), var(--hero))',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               color: 'var(--on-primary)',
+              boxShadow: 'var(--btn-shadow)',
+              transition: 'transform 0.18s ease',
             }}
           >
-            <Sparkles size={20} />
+            <Sparkles size={21} />
           </div>
           <span>
             Quiz<span style={{ color: 'var(--primary)' }}>ese</span>
           </span>
           <span
             className="badge badge-primary nav-brand-badge"
-            style={{ fontSize: '0.65rem', padding: '0.15rem 0.45rem', marginLeft: '0.2rem' }}
+            style={{ fontSize: '0.65rem', padding: '0.18rem 0.55rem', marginLeft: '0.15rem' }}
           >
             AI Studio
           </span>
@@ -83,9 +88,9 @@ export const Navbar = () => {
         <div
           style={{
             alignItems: 'center',
-            gap: '1.25rem',
+            gap: '1rem',
             fontSize: '0.92rem',
-            fontWeight: 600,
+            fontWeight: 700,
           }}
           className="desktop-links"
         >
@@ -95,13 +100,13 @@ export const Navbar = () => {
               to="/join"
               style={{
                 color: isActive('/join') ? 'var(--primary-text)' : 'var(--text-muted)',
-                backgroundColor: isActive('/join') ? 'var(--surface-2)' : 'transparent',
-                padding: '0.4rem 0.8rem',
+                backgroundColor: isActive('/join') ? 'var(--primary-soft)' : 'transparent',
+                padding: '0.45rem 0.9rem',
                 borderRadius: 'var(--radius-btn)',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '0.35rem',
-                transition: 'color 0.15s ease',
+                gap: '0.4rem',
+                transition: 'all 0.18s ease',
               }}
             >
               <Zap size={15} /> Join Quiz
@@ -113,13 +118,13 @@ export const Navbar = () => {
               to="/dashboard"
               style={{
                 color: isActive('/dashboard') ? 'var(--primary-text)' : 'var(--text-muted)',
-                backgroundColor: isActive('/dashboard') ? 'var(--surface-2)' : 'transparent',
-                padding: '0.4rem 0.8rem',
+                backgroundColor: isActive('/dashboard') ? 'var(--primary-soft)' : 'transparent',
+                padding: '0.45rem 0.9rem',
                 borderRadius: 'var(--radius-btn)',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '0.35rem',
-                transition: 'color 0.15s ease',
+                gap: '0.4rem',
+                transition: 'all 0.18s ease',
               }}
             >
               <LayoutDashboard size={15} /> Dashboard
@@ -132,15 +137,15 @@ export const Navbar = () => {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '0.35rem',
+                gap: '0.4rem',
                 color: isActive('/predictions') ? 'var(--primary-text)' : 'var(--text-muted)',
-                backgroundColor: isActive('/predictions') ? 'var(--surface-2)' : 'transparent',
-                padding: '0.4rem 0.8rem',
+                backgroundColor: isActive('/predictions') ? 'var(--primary-soft)' : 'transparent',
+                padding: '0.45rem 0.9rem',
                 borderRadius: 'var(--radius-btn)',
-                transition: 'color 0.15s ease',
+                transition: 'all 0.18s ease',
               }}
             >
-              <Sparkles size={14} /> AI Insights
+              <Sparkles size={15} /> AI Insights
             </Link>
           )}
 
@@ -150,12 +155,13 @@ export const Navbar = () => {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '0.35rem',
+                gap: '0.4rem',
                 color: isActive('/admin') ? 'var(--primary-text)' : 'var(--text-muted)',
-                backgroundColor: isActive('/admin') ? 'var(--surface-2)' : 'transparent',
-                padding: '0.4rem 0.8rem',
+                backgroundColor: isActive('/admin') ? 'var(--primary-soft)' : 'transparent',
+                padding: '0.45rem 0.9rem',
                 borderRadius: 'var(--radius-btn)',
                 fontWeight: 700,
+                transition: 'all 0.18s ease',
               }}
             >
               <Shield size={15} /> Admin
@@ -168,12 +174,14 @@ export const Navbar = () => {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '0.4rem',
+                gap: '0.45rem',
                 color: 'var(--on-primary)',
-                backgroundColor: 'var(--primary)',
-                padding: '0.45rem 0.95rem',
+                background: 'linear-gradient(135deg, var(--primary), var(--hero))',
+                padding: '0.5rem 1.05rem',
                 borderRadius: 'var(--radius-btn)',
                 fontWeight: 700,
+                boxShadow: 'var(--btn-shadow)',
+                transition: 'transform 0.18s ease, box-shadow 0.18s ease',
               }}
             >
               <PlusCircle size={16} /> Create Quiz

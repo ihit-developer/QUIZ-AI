@@ -52,7 +52,7 @@ export const LiveRoom = () => {
   const [submissionStats, setSubmissionStats] = useState({ submittedCount: 0, totalParticipants: 0 });
   const launchSprinkles = useCallback((count = 18) => {
     try {
-      confetti({ particleCount: count, spread: 36, startVelocity: 18, scalar: 0.62, gravity: 1.12, origin: { x: 0.5, y: 0.72 }, colors: ['#f43f5e', '#fb7185', '#fbbf24', '#34d399', '#60a5fa'] });
+      confetti({ particleCount: count, spread: 36, startVelocity: 18, scalar: 0.62, gravity: 1.12, origin: { x: 0.5, y: 0.72 }, colors: ['#087F5B', '#065F46', '#10B981', '#D1FAE5', '#F59E0B'] });
     } catch {}
   }, []);
 
@@ -781,7 +781,7 @@ export const LiveRoom = () => {
             </p>
           </div>
 
-          {/* 3-Tier Red Podium: 2nd (Left), 1st (Center), 3rd (Right) */}
+          {/* 3-Tier Emerald Podium: 2nd (Left), 1st (Center), 3rd (Right) */}
           <div
             style={{
               display: 'flex',
@@ -793,7 +793,7 @@ export const LiveRoom = () => {
               paddingTop: '1.5rem',
             }}
           >
-            {/* 2nd Place (Left) - Solid Deep Red */}
+            {/* 2nd Place (Left) - Deep Emerald */}
             {leaderboard[1] ? (
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
                 <div

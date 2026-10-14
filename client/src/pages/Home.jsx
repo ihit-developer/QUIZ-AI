@@ -57,42 +57,68 @@ export const Home = () => {
   ];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '4rem', padding: '1rem 0 3rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '4.5rem', padding: '1rem 0 3.5rem' }}>
       {/* 1. Hero Section */}
       <section
         style={{
           textAlign: 'center',
-          maxWidth: '920px',
+          maxWidth: '960px',
           margin: '0 auto',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          gap: '1.5rem',
+          gap: '1.75rem',
+          position: 'relative',
         }}
       >
-        <Badge variant="primary">
-          Next-Gen AI Multiplayer Assessment Platform
-        </Badge>
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            padding: '0.4rem 1rem',
+            borderRadius: 'var(--radius-pill)',
+            backgroundColor: 'var(--primary-soft)',
+            border: '1px solid var(--border)',
+            color: 'var(--primary-text)',
+            fontSize: '0.82rem',
+            fontWeight: 800,
+            letterSpacing: '0.04em',
+            boxShadow: '0 2px 8px rgba(225, 29, 72, 0.08)',
+          }}
+        >
+          <Sparkles size={14} />
+          <span>Next-Gen AI Multiplayer Assessment Platform</span>
+        </div>
 
         <h1
           style={{
-            fontSize: 'clamp(2.4rem, 5.2vw, 4.2rem)',
+            fontSize: 'clamp(2.5rem, 5.5vw, 4.4rem)',
             fontWeight: 900,
-            lineHeight: 1.15,
-            letterSpacing: '-0.035em',
+            lineHeight: 1.12,
+            letterSpacing: '-0.04em',
             color: 'var(--text)',
+            margin: 0,
           }}
         >
           Supercharge Live Exams with <br />
-          <span style={{ color: 'var(--primary)' }}>AI Trajectory & Real-Time Arena</span>
+          <span style={{ 
+            background: 'linear-gradient(135deg, var(--primary) 20%, var(--hero) 100%)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            display: 'inline-block'
+          }}>
+            AI Trajectory & Real-Time Arena
+          </span>
         </h1>
 
         <p
           style={{
-            fontSize: '1.15rem',
+            fontSize: '1.2rem',
             color: 'var(--text-muted)',
-            maxWidth: '680px',
-            lineHeight: 1.6,
+            maxWidth: '700px',
+            lineHeight: 1.65,
+            margin: 0,
           }}
         >
           Generate smart questions with Claude AI, track live multi-student attempt telemetry, forecast performance curves, and celebrate champions with dynamic podium rankings.
@@ -105,19 +131,21 @@ export const Home = () => {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '1rem',
-              padding: '1.25rem 2rem',
-              marginTop: '0.5rem',
+              gap: '1.25rem',
+              padding: '1.5rem 2.25rem',
+              marginTop: '0.75rem',
               flexWrap: 'wrap',
               backgroundColor: 'var(--surface-2)',
               border: '1.5px solid var(--border)',
+              borderRadius: '24px',
+              boxShadow: 'var(--card-shadow)',
             }}
           >
             <div style={{ textAlign: 'left', marginRight: '0.5rem' }}>
-              <div style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--primary-text)', letterSpacing: '0.05em' }}>
+              <div style={{ fontSize: '0.78rem', fontWeight: 900, color: 'var(--primary-text)', letterSpacing: '0.06em' }}>
                 HOST STUDIO READY
               </div>
-              <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text)' }}>
+              <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text)', marginTop: '0.15rem' }}>
                 Welcome back, {user.name}! Manage your cohort sessions
               </div>
             </div>
@@ -135,15 +163,16 @@ export const Home = () => {
             style={{
               display: 'flex',
               alignItems: 'center',
-              padding: '0.4rem',
+              padding: '0.45rem',
               gap: '0.5rem',
-              maxWidth: '520px',
+              maxWidth: '540px',
               width: '100%',
               marginTop: '0.5rem',
               backgroundColor: 'var(--surface)',
               border: '1.5px solid var(--border)',
               borderRadius: 'var(--radius-card)',
-              boxShadow: 'var(--card-shadow)',
+              boxShadow: 'var(--card-shadow-hover)',
+              transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
             }}
           >
             <div style={{ position: 'relative', flex: 1 }}>
@@ -157,7 +186,7 @@ export const Home = () => {
                   width: '100%',
                   background: 'transparent',
                   border: 'none',
-                  padding: '0.85rem 1.15rem',
+                  padding: '0.85rem 1.25rem',
                   fontSize: '1.05rem',
                   fontWeight: 800,
                   letterSpacing: '0.08em',
@@ -169,7 +198,7 @@ export const Home = () => {
               type="button"
               onClick={() => navigate('/join')}
               className="btn-secondary"
-              style={{ padding: '0.65rem 0.95rem', minHeight: '44px' }}
+              style={{ padding: '0.65rem 1rem', minHeight: '44px' }}
               title="Open QR Camera Scanner"
               aria-label="Scan QR Code"
             >
@@ -178,14 +207,14 @@ export const Home = () => {
             <button
               type="submit"
               className="btn-primary"
-              style={{ padding: '0.75rem 1.6rem', fontSize: '0.95rem', whiteSpace: 'nowrap' }}
+              style={{ padding: '0.75rem 1.75rem', fontSize: '0.98rem', whiteSpace: 'nowrap' }}
             >
-              Join <ArrowRight size={16} />
+              Join <ArrowRight size={17} />
             </button>
           </form>
         )}
 
-        {/* Hero Flat SVG Illustration in Red & Neutral Tones */}
+        {/* Hero Flat SVG Illustration in Emerald & Warm Cream Tones */}
         <div style={{ width: '100%', maxWidth: '640px', marginTop: '1.5rem' }}>
           <svg viewBox="0 0 640 240" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ width: '100%', height: 'auto' }}>
             <rect x="20" y="20" width="600" height="200" rx="16" fill="var(--surface-2)" stroke="var(--border)" strokeWidth="1.5" />
@@ -213,72 +242,78 @@ export const Home = () => {
       </section>
 
       {/* 2. Three Feature Cards */}
-      <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem' }}>
-        <Card hoverLift style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+      <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: '1.5rem' }}>
+        <Card hoverLift style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '2rem' }}>
           <div
             style={{
-              width: '46px',
-              height: '46px',
-              borderRadius: '12px',
-              backgroundColor: 'var(--primary-soft)',
+              width: '52px',
+              height: '52px',
+              borderRadius: '14px',
+              background: 'linear-gradient(135deg, var(--primary-soft) 0%, var(--surface-2) 100%)',
+              border: '1px solid var(--border)',
               color: 'var(--primary-text)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+              boxShadow: '0 2px 8px rgba(8, 127, 91, 0.08)',
             }}
           >
-            <BrainCircuit size={24} />
+            <BrainCircuit size={26} />
           </div>
-          <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text)' }}>
+          <h3 style={{ fontSize: '1.3rem', fontWeight: 900, color: 'var(--text)', margin: 0 }}>
             AI Question Generator
           </h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', lineHeight: 1.55 }}>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', lineHeight: 1.6, margin: 0 }}>
             Generate comprehensive question banks across subjects and difficulty levels using Claude AI in under ten seconds.
           </p>
         </Card>
 
-        <Card hoverLift style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+        <Card hoverLift style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '2rem' }}>
           <div
             style={{
-              width: '46px',
-              height: '46px',
-              borderRadius: '12px',
-              backgroundColor: 'var(--primary-soft)',
+              width: '52px',
+              height: '52px',
+              borderRadius: '14px',
+              background: 'linear-gradient(135deg, var(--primary-soft) 0%, var(--surface-2) 100%)',
+              border: '1px solid var(--border)',
               color: 'var(--primary-text)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+              boxShadow: '0 2px 8px rgba(225, 29, 72, 0.08)',
             }}
           >
-            <Flame size={24} />
+            <Flame size={26} />
           </div>
-          <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text)' }}>
+          <h3 style={{ fontSize: '1.3rem', fontWeight: 900, color: 'var(--text)', margin: 0 }}>
             Live Multiplayer Arena
           </h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', lineHeight: 1.55 }}>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', lineHeight: 1.6, margin: 0 }}>
             Host synchronous multiplayer rooms with synchronized countdown timers, instantaneous socket feedback, and podium celebrations.
           </p>
         </Card>
 
-        <Card hoverLift style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+        <Card hoverLift style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '2rem' }}>
           <div
             style={{
-              width: '46px',
-              height: '46px',
-              borderRadius: '12px',
-              backgroundColor: 'var(--primary-soft)',
+              width: '52px',
+              height: '52px',
+              borderRadius: '14px',
+              background: 'linear-gradient(135deg, var(--primary-soft) 0%, var(--surface-2) 100%)',
+              border: '1px solid var(--border)',
               color: 'var(--primary-text)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+              boxShadow: '0 2px 8px rgba(225, 29, 72, 0.08)',
             }}
           >
-            <ShieldCheck size={24} />
+            <ShieldCheck size={26} />
           </div>
-          <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text)' }}>
+          <h3 style={{ fontSize: '1.3rem', fontWeight: 900, color: 'var(--text)', margin: 0 }}>
             IRT Difficulty Prediction
           </h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', lineHeight: 1.55 }}>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', lineHeight: 1.6, margin: 0 }}>
             Identify at-risk learners early in the attempt. Statistical models project end-of-exam grades before test conclusion.
           </p>
         </Card>
@@ -289,82 +324,89 @@ export const Home = () => {
         style={{
           backgroundColor: 'var(--surface)',
           border: '1px solid var(--border)',
-          borderRadius: 'var(--radius-card)',
-          padding: '2.5rem 2rem',
+          borderRadius: '24px',
+          padding: '3rem 2.25rem',
+          boxShadow: 'var(--card-shadow)',
         }}
       >
-        <div style={{ textAlign: 'center', maxWidth: '600px', margin: '0 auto 2.5rem' }}>
-          <div style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--primary-text)', letterSpacing: '0.05em' }}>
+        <div style={{ textAlign: 'center', maxWidth: '600px', margin: '0 auto 2.75rem' }}>
+          <div style={{ fontSize: '0.78rem', fontWeight: 900, color: 'var(--primary-text)', letterSpacing: '0.06em' }}>
             SIMPLE 3-STEP WORKFLOW
           </div>
-          <h2 style={{ fontSize: '1.85rem', fontWeight: 900, color: 'var(--text)', marginTop: '0.35rem' }}>
+          <h2 style={{ fontSize: '2rem', fontWeight: 900, color: 'var(--text)', marginTop: '0.4rem', letterSpacing: '-0.03em' }}>
             Built for Educators & Students
           </h2>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '2rem' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             <div
               style={{
-                width: '36px',
-                height: '36px',
+                width: '42px',
+                height: '42px',
                 borderRadius: '50%',
-                backgroundColor: 'var(--primary)',
+                background: 'linear-gradient(135deg, var(--primary), var(--hero))',
                 color: 'var(--on-primary)',
-                fontWeight: 800,
+                fontWeight: 900,
+                fontSize: '1.1rem',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
+                boxShadow: 'var(--btn-shadow)',
               }}
             >
               1
             </div>
-            <h4 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text)' }}>Create or Import</h4>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: 1.5 }}>
+            <h4 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text)' }}>Create or Import</h4>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', lineHeight: 1.6 }}>
               Use our AI prompt generator or builder wizard to configure question types, scoring rules, and anti-cheat settings.
             </p>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             <div
               style={{
-                width: '36px',
-                height: '36px',
+                width: '42px',
+                height: '42px',
                 borderRadius: '50%',
-                backgroundColor: 'var(--hero)',
+                background: 'linear-gradient(135deg, var(--hero), #6b0d24)',
                 color: 'var(--on-primary)',
-                fontWeight: 800,
+                fontWeight: 900,
+                fontSize: '1.1rem',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
+                boxShadow: '0 4px 14px rgba(136, 19, 55, 0.3)',
               }}
             >
               2
             </div>
-            <h4 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text)' }}>Project Code & Join</h4>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: 1.5 }}>
+            <h4 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text)' }}>Project Code & Join</h4>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', lineHeight: 1.6 }}>
               Students scan the projected QR code or enter the 6-character room code on any phone, tablet, or browser with zero friction.
             </p>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             <div
               style={{
-                width: '36px',
-                height: '36px',
+                width: '42px',
+                height: '42px',
                 borderRadius: '50%',
-                backgroundColor: 'var(--primary)',
+                background: 'linear-gradient(135deg, var(--primary), var(--hero))',
                 color: 'var(--on-primary)',
-                fontWeight: 800,
+                fontWeight: 900,
+                fontSize: '1.1rem',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
+                boxShadow: 'var(--btn-shadow)',
               }}
             >
               3
             </div>
-            <h4 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text)' }}>Assess & Celebrate</h4>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: 1.5 }}>
+            <h4 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text)' }}>Assess & Celebrate</h4>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', lineHeight: 1.6 }}>
               Deliver instantaneous question feedback, review real-time cohort error rates, and celebrate top podium finishes.
             </p>
           </div>
@@ -375,48 +417,80 @@ export const Home = () => {
       <section
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
           gap: '1.25rem',
         }}
       >
-        <Card style={{ textAlign: 'center', padding: '1.75rem 1rem' }}>
-          <div style={{ fontSize: '2.5rem', fontWeight: 900, color: 'var(--primary)', fontVariantNumeric: 'tabular-nums' }}>
+        <Card hoverLift style={{ textAlign: 'center', padding: '2rem 1.25rem' }}>
+          <div style={{ 
+            fontSize: '2.75rem', 
+            fontWeight: 900, 
+            background: 'linear-gradient(135deg, var(--primary), var(--hero))',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            fontVariantNumeric: 'tabular-nums',
+            lineHeight: 1.1,
+          }}>
             99.4%
           </div>
-          <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text)', marginTop: '0.25rem' }}>
+          <div style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text)', marginTop: '0.35rem' }}>
             Platform Uptime
           </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Socket WebSocket SLA</div>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>Socket WebSocket SLA</div>
         </Card>
 
-        <Card style={{ textAlign: 'center', padding: '1.75rem 1rem' }}>
-          <div style={{ fontSize: '2.5rem', fontWeight: 900, color: 'var(--primary)', fontVariantNumeric: 'tabular-nums' }}>
+        <Card hoverLift style={{ textAlign: 'center', padding: '2rem 1.25rem' }}>
+          <div style={{ 
+            fontSize: '2.75rem', 
+            fontWeight: 900, 
+            background: 'linear-gradient(135deg, var(--primary), var(--hero))',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            fontVariantNumeric: 'tabular-nums',
+            lineHeight: 1.1,
+          }}>
             &lt; 50ms
           </div>
-          <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text)', marginTop: '0.25rem' }}>
+          <div style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text)', marginTop: '0.35rem' }}>
             Live Answer Latency
           </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Real-time telemetry</div>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>Real-time telemetry</div>
         </Card>
 
-        <Card style={{ textAlign: 'center', padding: '1.75rem 1rem' }}>
-          <div style={{ fontSize: '2.5rem', fontWeight: 900, color: 'var(--primary)', fontVariantNumeric: 'tabular-nums' }}>
+        <Card hoverLift style={{ textAlign: 'center', padding: '2rem 1.25rem' }}>
+          <div style={{ 
+            fontSize: '2.75rem', 
+            fontWeight: 900, 
+            background: 'linear-gradient(135deg, var(--primary), var(--hero))',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            fontVariantNumeric: 'tabular-nums',
+            lineHeight: 1.1,
+          }}>
             100%
           </div>
-          <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text)', marginTop: '0.25rem' }}>
-            Red Theme Identity
+          <div style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text)', marginTop: '0.35rem' }}>
+            Emerald SaaS Palette
           </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Light & Dark accessibility</div>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>Warm Cream & Accessible</div>
         </Card>
 
-        <Card style={{ textAlign: 'center', padding: '1.75rem 1rem' }}>
-          <div style={{ fontSize: '2.5rem', fontWeight: 900, color: 'var(--primary)', fontVariantNumeric: 'tabular-nums' }}>
+        <Card hoverLift style={{ textAlign: 'center', padding: '2rem 1.25rem' }}>
+          <div style={{ 
+            fontSize: '2.75rem', 
+            fontWeight: 900, 
+            background: 'linear-gradient(135deg, var(--primary), var(--hero))',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            fontVariantNumeric: 'tabular-nums',
+            lineHeight: 1.1,
+          }}>
             60 FPS
           </div>
-          <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text)', marginTop: '0.25rem' }}>
+          <div style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text)', marginTop: '0.35rem' }}>
             Jank-Free Scrolling
           </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Hardware accelerated</div>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>Hardware accelerated</div>
         </Card>
       </section>
 

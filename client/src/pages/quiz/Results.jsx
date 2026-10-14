@@ -62,7 +62,7 @@ export const Results = () => {
           particleCount: 80,
           spread: 85,
           origin: { y: 0.35 },
-          colors: ['#E11D48', '#BE123C', '#F43F5E', '#FDA4AF', '#FFFFFF', '#0C0A0A'],
+          colors: ['#087F5B', '#065F46', '#10B981', '#D1FAE5', '#FFFFFF', '#24332E'],
         });
       } catch {}
     }

@@ -197,7 +197,7 @@ export const AttemptRoom = () => {
         particleCount: 30,
         spread: 50,
         origin: { y: 0.2 },
-        colors: ['#E11D48', '#BE123C', '#FB7185', '#9F1239', '#FFFFFF'],
+        colors: ['#087F5B', '#065F46', '#10B981', '#A7F3D0', '#FFFFFF', '#D1FAE5'],
         ticks: 150,
         gravity: 0.9,
       });

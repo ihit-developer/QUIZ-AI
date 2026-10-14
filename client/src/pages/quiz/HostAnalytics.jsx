@@ -32,13 +32,14 @@ import { StatCard } from '../../components/ui/StatCard';
 import { PageSkeletonLoader } from '../../components/ui/Skeleton';
 import toast from 'react-hot-toast';
 
-// 100% RED Monochromatic Theme Palette for Recharts
-const RED_PALETTE = {
-  primary: '#E11D48',
-  dark: '#9F1239',
-  deep: '#7F1D1D',
-  blush: '#FDA4AF',
-  soft: '#FFE4E6',
+// Emerald Green & Warm Cream Theme Palette for Recharts Data Visualizations
+const EMERALD_PALETTE = {
+  primary: '#087F5B',
+  dark: '#065F46',
+  deep: '#044E39',
+  soft: '#D1FAE5',
+  cream: '#F1F4EE',
+  warning: '#D97706',
 };
 
 export const HostAnalytics = () => {

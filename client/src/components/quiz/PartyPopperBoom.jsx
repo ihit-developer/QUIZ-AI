@@ -23,35 +23,35 @@ export const PartyPopperBoom = ({ leaderboard = [] }) => {
     setBoomCount((prev) => prev + 1);
 
     try {
-      // 1. Left party popper cannon blast (Red spectrum)
+      // 1. Left party popper cannon blast (Emerald spectrum)
       confetti({
         particleCount: 70,
         angle: 60,
         spread: 75,
         origin: { x: 0.05, y: 0.8 },
-        colors: ['#E11D48', '#BE123C', '#F43F5E', '#FDA4AF', '#FFFFFF', '#9F1239'],
+        colors: ['#087F5B', '#065F46', '#10B981', '#D1FAE5', '#FFFFFF', '#044E39'],
         ticks: 240,
         gravity: 0.9,
       });
 
-      // 2. Right party popper cannon blast (Red spectrum)
+      // 2. Right party popper cannon blast (Emerald spectrum)
       confetti({
         particleCount: 70,
         angle: 120,
         spread: 75,
         origin: { x: 0.95, y: 0.8 },
-        colors: ['#E11D48', '#BE123C', '#F43F5E', '#FDA4AF', '#FFFFFF', '#7F1D1D'],
+        colors: ['#087F5B', '#065F46', '#10B981', '#D1FAE5', '#FFFFFF', '#064E3B'],
         ticks: 240,
         gravity: 0.9,
       });
 
-      // 3. Center ruby starburst boom
+      // 3. Center emerald starburst boom
       setTimeout(() => {
         confetti({
           particleCount: 90,
           spread: 100,
           origin: { x: 0.5, y: 0.45 },
-          colors: ['#E11D48', '#F43F5E', '#FDA4AF', '#FFFFFF', '#9F1239'],
+          colors: ['#087F5B', '#10B981', '#A7F3D0', '#FFFFFF', '#044E39'],
           shapes: ['circle'],
           ticks: 220,
         });
@@ -63,7 +63,7 @@ export const PartyPopperBoom = ({ leaderboard = [] }) => {
           particleCount: 60,
           spread: 120,
           origin: { x: 0.5, y: 0.15 },
-          colors: ['#E11D48', '#BE123C', '#F43F5E', '#FFFFFF'],
+          colors: ['#087F5B', '#065F46', '#10B981', '#FFFFFF'],
           ticks: 260,
           gravity: 0.7,
         });
