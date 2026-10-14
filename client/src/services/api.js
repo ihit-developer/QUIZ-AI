@@ -1,7 +1,13 @@
 import axios from 'axios';
 
+const isLocalDevelopment = typeof window !== 'undefined' &&
+  ['localhost', '127.0.0.1'].includes(window.location.hostname);
+
+// Local Vite (5173) and Express (5000) run on separate ports. On Vercel both
+// services share one domain, so API calls must stay on the current origin.
 const apiBaseUrl = import.meta.env.VITE_API_URL ||
-  (typeof window !== 'undefined' ? `${window.location.origin}/api/v1` : 'http://localhost:5000/api/v1');
+  (isLocalDevelopment ? 'http://localhost:5000/api/v1' :
+    (typeof window !== 'undefined' ? `${window.location.origin}/api/v1` : 'http://localhost:5000/api/v1'));
 
 const api = axios.create({
   baseURL: apiBaseUrl,
