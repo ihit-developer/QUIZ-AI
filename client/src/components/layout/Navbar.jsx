@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, LogOut, Menu, Sparkles, X } from 'lucide-react';
+import { BarChart3, BrainCircuit, CirclePlus, LayoutDashboard, LogOut, Menu, ShieldCheck, Sparkles, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { ThemeToggle } from '../ui/ThemeToggle';
 
@@ -10,6 +10,8 @@ export const Navbar = ({ compact = false }) => {
   const [open, setOpen] = useState(false);
   const isActive = (path) => location.pathname === path;
   const canJoinQuiz = user?.role !== 'admin';
+  const isHost = user?.role === 'host';
+  const isAdmin = user?.role === 'admin';
   return (
     <header className={`topbar ${compact ? 'topbar-compact' : ''}`}>
       <div className="topbar-inner">
@@ -21,7 +23,7 @@ export const Navbar = ({ compact = false }) => {
           <button className="topbar-menu" onClick={() => setOpen(!open)} aria-label="Open navigation">{open ? <X size={20} /> : <Menu size={20} />}</button>
         </div>
       </div>
-      {open && <nav className="topbar-mobile"><Link to="/" onClick={() => setOpen(false)}>Home</Link>{canJoinQuiz && <Link to="/join" onClick={() => setOpen(false)}>Join quiz</Link>}{user ? <><Link to="/dashboard" onClick={() => setOpen(false)}>Dashboard</Link><Link to="/profile" onClick={() => setOpen(false)}>Profile</Link><button type="button" onClick={logout}>Log out</button></> : <><Link to="/login" onClick={() => setOpen(false)}>Sign in</Link><Link to="/register" onClick={() => setOpen(false)}>Create account</Link></>}</nav>}
+      {open && <nav className="topbar-mobile"><Link to="/" onClick={() => setOpen(false)}>Home</Link>{user ? <><Link to="/dashboard" onClick={() => setOpen(false)}><LayoutDashboard size={17} /> Dashboard</Link>{isHost && <Link to="/create-quiz" onClick={() => setOpen(false)}><CirclePlus size={17} /> Create quiz</Link>}{isHost && <Link to="/analytics" onClick={() => setOpen(false)}><BarChart3 size={17} /> Analytics</Link>}{!isAdmin && <Link to="/join" onClick={() => setOpen(false)}>Join quiz</Link>}<Link to="/predictions" onClick={() => setOpen(false)}><BrainCircuit size={17} /> AI insights</Link>{isAdmin && <Link to="/admin" onClick={() => setOpen(false)}><ShieldCheck size={17} /> Administration</Link>}<Link to="/profile" onClick={() => setOpen(false)}>Profile & settings</Link><button type="button" onClick={logout}><LogOut size={17} /> Log out</button></> : <><Link to="/join" onClick={() => setOpen(false)}>Join quiz</Link><Link to="/login" onClick={() => setOpen(false)}>Sign in</Link><Link to="/register" onClick={() => setOpen(false)}>Create account</Link></>}</nav>}
     </header>
   );
 };

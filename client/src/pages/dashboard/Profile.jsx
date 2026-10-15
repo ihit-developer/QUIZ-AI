@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { User, Mail, Shield, Save, Upload, Camera, Trash2, CheckCircle2, MonitorSmartphone } from 'lucide-react';
+import { User, Mail, Shield, Save, Upload, Camera, Trash2, CheckCircle2, MonitorSmartphone, ArrowLeft } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Card } from '../../components/ui/Card';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
@@ -85,6 +86,7 @@ export const Profile = () => {
 
   return (
     <div className="app-page profile-page" style={{ maxWidth: '760px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      <Link to="/dashboard" className="profile-back-link"><ArrowLeft size={17} /> Back to dashboard</Link>
       <Card style={{ padding: '2.5rem' }}>
         <Badge variant="primary" style={{ marginBottom: '0.65rem' }}>
           ACCOUNT PREFERENCES
