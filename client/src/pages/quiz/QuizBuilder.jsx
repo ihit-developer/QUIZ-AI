@@ -231,10 +231,12 @@ export const QuizBuilder = () => {
       imported = blocks.map((block) => {
         const lines = block.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
         const answerLine = lines.find((line) => /^(answer|correct answer|جواب|درست جواب|صحیح جواب)\s*[:：]/iu.test(line));
-        const optionPattern = /^(A|B|C|D|a|b|c|d|1|2|3|4|الف|ا|ب|ج|د)\s*[.)،:：-]\s*(.+)$/u;
-        const optionEntries = lines.map((line) => {
+        // Accept common English and Urdu option markers, including Urdu full stop
+        // (۔), Arabic comma (،), parentheses, and hyphen styles.
+        const optionPattern = /^\s*\(?\s*(الف|ا|ب|ج|د|A|B|C|D|a|b|c|d|1|2|3|4)\s*\)?\s*(?:[.)،۔:：]|[-–—])\s*(.+?)\s*$/u;
+        const optionEntries = lines.map((line, lineIndex) => {
           const match = line.match(optionPattern);
-          return match ? { line, label: match[1], text: match[2].trim() } : null;
+          return match ? { line, lineIndex, label: match[1], text: match[2].trim() } : null;
         }).filter(Boolean);
         const optionLines = optionEntries.map((entry) => entry.line);
         const options = optionEntries.map((entry) => ({ text: entry.text, isCorrect: false }));
@@ -247,7 +249,11 @@ export const QuizBuilder = () => {
           ? answerIndex
           : options.findIndex((option) => option.text.toLocaleLowerCase() === answer.toLocaleLowerCase());
         if (matchedAnswerIndex >= 0) options[matchedAnswerIndex].isCorrect = true;
-        const title = lines.filter((line) => !optionLines.includes(line) && line !== answerLine).join(' ')
+        // A question title must only use text before the first answer option.
+        // This prevents an Urdu option from being appended to the question when
+        // the pasted document uses a different label punctuation style.
+        const firstOptionLine = optionEntries[0]?.lineIndex ?? lines.length;
+        const title = lines.slice(0, firstOptionLine).filter((line) => line !== answerLine).join(' ')
           .replace(/^\d+[.)]\s*/, '');
         return normaliseImportedQuestion({ title, options });
       }).filter(Boolean);
