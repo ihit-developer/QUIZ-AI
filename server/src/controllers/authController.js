@@ -4,6 +4,8 @@ const crypto = require('crypto');
 const connectDB = require('../config/db');
 const { sendOtpEmail, sendLoginAlert } = require('../services/emailService');
 const { writeAuditLog } = require('../services/auditService');
+const { createSession, refreshSession, deactivateSession } = require('../services/sessionService');
+const UserSession = require('../models/UserSession');
 const {
   signAccessToken,
   signRefreshToken,
@@ -190,8 +192,9 @@ const login = async (req, res, next) => {
       });
     }
 
-    const accessToken = signAccessToken(user);
-    const refreshToken = signRefreshToken(user);
+    const sessionId = await createSession(user, req);
+    const accessToken = signAccessToken(user, sessionId);
+    const refreshToken = signRefreshToken(user, sessionId);
 
     res.cookie('refreshToken', refreshToken, cookieOptions);
     sendLoginAlert({ email: user.email, name: user.name }).catch((error) => console.error('Login email failed:', error.message));
@@ -249,8 +252,18 @@ const refreshToken = async (req, res, next) => {
       });
     }
 
-    const newAccessToken = signAccessToken(user);
-    const newRefreshToken = signRefreshToken(user);
+    if (decoded.sid) {
+      try {
+        const session = await UserSession.findOne({ sessionId: decoded.sid, userId: user._id || user.id, isActive: true });
+        if (!session) return res.status(401).json({ success: false, message: 'This device session has ended. Please sign in again.' });
+      } catch (error) {
+        if (isProductionDeployment) throw error;
+      }
+      await refreshSession(decoded.sid);
+    }
+
+    const newAccessToken = signAccessToken(user, decoded.sid);
+    const newRefreshToken = signRefreshToken(user, decoded.sid);
 
     res.cookie('refreshToken', newRefreshToken, cookieOptions);
 
@@ -309,8 +322,9 @@ const verifyEmail = async (req, res, next) => {
       user = { id: 'user_' + Date.now(), _id: 'user_' + Date.now(), name: pending.name, email: pending.email, password: pending.passwordHash || '', role: pending.role, googleId: pending.googleId || '', isEmailVerified: true, bio: '', avatar: pending.avatar || '' };
       memoryUsers.set(email, user); pendingRegistrations.delete(email);
     }
-    const accessToken = signAccessToken(user);
-    res.cookie('refreshToken', signRefreshToken(user), cookieOptions);
+    const sessionId = await createSession(user, req);
+    const accessToken = signAccessToken(user, sessionId);
+    res.cookie('refreshToken', signRefreshToken(user, sessionId), cookieOptions);
     if (pending.googleId) {
       sendLoginAlert({ email: user.email, name: user.name }).catch(() => {});
       await writeAuditLog({ user, action: 'USER_SIGNED_IN', resource: 'Account sign-in', details: { method: 'google_otp' }, req });
@@ -418,11 +432,32 @@ const googleCallback = async (req, res, next) => {
 };
 
 const logout = async (req, res) => {
+  try {
+    const token = req.cookies?.refreshToken || req.body?.refreshToken;
+    if (token) {
+      const decoded = verifyRefreshToken(token);
+      await deactivateSession(decoded.sid);
+    }
+  } catch {}
   res.clearCookie('refreshToken', cookieOptions);
   res.status(200).json({
     success: true,
     message: 'Logged out successfully.',
   });
+};
+
+const getSessions = async (req, res, next) => {
+  try {
+    const sessions = await UserSession.find({ userId: req.user._id || req.user.id, isActive: true })
+      .sort({ lastActiveAt: -1 }).select('sessionId device ipAddress lastActiveAt createdAt').lean();
+    res.json({ success: true, data: { sessions: sessions.map((session) => ({
+      id: session._id,
+      device: session.device,
+      lastActiveAt: session.lastActiveAt,
+      signedInAt: session.createdAt,
+      current: Boolean(req.sessionId && session.sessionId === req.sessionId),
+    })) } });
+  } catch (error) { next(error); }
 };
 
 const getMe = async (req, res, next) => {
@@ -491,7 +526,7 @@ module.exports = {
   register,
   login,
   refreshToken,
-  logout,
+  logout, getSessions,
   getMe,
   updateProfile,
   memoryUsers,

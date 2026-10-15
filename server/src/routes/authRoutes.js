@@ -5,6 +5,7 @@ const {
   login,
   refreshToken,
   logout,
+  getSessions,
   getMe,
   updateProfile,
   verifyEmail,
@@ -35,6 +36,7 @@ router.post('/reset-password', validate(resetPasswordSchema), resetPassword);
 router.post('/refresh-token', refreshToken);
 router.post('/logout', logout);
 router.get('/me', authenticate, getMe);
+router.get('/sessions', authenticate, getSessions);
 router.put('/profile', authenticate, validate(updateProfileSchema), updateProfile);
 router.put('/change-password', authenticate, validate(changePasswordSchema), changePassword);
 

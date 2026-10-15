@@ -22,6 +22,7 @@ const authenticate = async (req, res, next) => {
     }
 
     const decoded = verifyAccessToken(token);
+    req.sessionId = decoded.sid || null;
     let user;
 
     try {

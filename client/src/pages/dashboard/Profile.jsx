@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { User, Mail, Shield, Save, Upload, Camera, Trash2, CheckCircle2 } from 'lucide-react';
+import { User, Mail, Shield, Save, Upload, Camera, Trash2, CheckCircle2, MonitorSmartphone } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
@@ -17,7 +17,16 @@ export const Profile = () => {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
+  const [sessions, setSessions] = useState([]);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
   const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    authService.getSessions()
+      .then((res) => { if (res.success) setSessions(res.data.sessions || []); })
+      .catch(() => {})
+      .finally(() => setSessionsLoading(false));
+  }, []);
 
   // File upload handler to convert local picture into Base64 data URL
   const handleFileUpload = (e) => {
@@ -299,6 +308,11 @@ export const Profile = () => {
           <Input label="New Password" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required />
           <Button type="submit" disabled={changingPassword || newPassword.length < 6}>{changingPassword ? 'Updating Password...' : 'Update Password'}</Button>
         </form>
+      </Card>
+      <Card style={{ padding: '2rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.35rem' }}><MonitorSmartphone size={20} color="var(--primary)" /><h3 style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--text)' }}>Signed-in devices</h3></div>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1rem' }}>See the devices where your account is currently signed in.</p>
+        {sessionsLoading ? <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Loading devices...</p> : sessions.length === 0 ? <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No active device records yet. Sign out and sign in again to create one.</p> : <div style={{ display: 'grid', gap: '0.65rem' }}>{sessions.map((session) => <div key={session.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', padding: '0.85rem 1rem', border: '1px solid var(--border)', borderRadius: 'var(--radius-btn)', background: 'var(--surface-2)' }}><div><strong style={{ color: 'var(--text)', fontSize: '0.9rem' }}>{session.device}{session.current ? ' (This device)' : ''}</strong><div style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginTop: '0.2rem' }}>Last active: {new Date(session.lastActiveAt).toLocaleString()}</div></div>{session.current && <Badge variant="primary">CURRENT</Badge>}</div>)}</div>}
       </Card>
     </div>
   );
