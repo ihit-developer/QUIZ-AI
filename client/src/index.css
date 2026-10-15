@@ -667,3 +667,21 @@ table tbody tr {
   }
 }
 
+/* Quiz builder: copy-friendly imports and touch-friendly mobile controls. */
+.bulk-import-formats { border:1px solid var(--border); border-radius:12px; background:var(--surface-2); padding:.8rem 1rem; }
+.bulk-import-formats summary { cursor:pointer; color:var(--primary-text); font-size:.84rem; font-weight:800; }
+.bulk-import-format-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.75rem; margin-top:.8rem; }
+.bulk-import-format-grid > div { min-width:0; padding:.75rem; border:1px solid var(--border); border-radius:10px; background:var(--surface); }
+.bulk-import-format-grid strong { color:var(--text); font-size:.82rem; }
+.bulk-import-format-grid pre { margin:.55rem 0 0; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--text-muted); font:600 .78rem/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.bulk-import-formats p { margin:.75rem 0 0; color:var(--text-muted); font-size:.76rem; line-height:1.5; }
+.bulk-import-formats code { color:var(--primary-text); font-weight:700; }
+@media (max-width: 600px) {
+  .builder-page { gap:1.1rem !important; }
+  .builder-page .card-solid { padding:1rem !important; }
+  .builder-question-actions,.bulk-import-actions { width:100%; flex-wrap:wrap; }
+  .builder-question-actions .btn,.bulk-import-actions .btn { flex:1 1 145px; justify-content:center; }
+  .bulk-import-format-grid { grid-template-columns:1fr; }
+  .builder-page textarea { font-size:16px; }
+}
+

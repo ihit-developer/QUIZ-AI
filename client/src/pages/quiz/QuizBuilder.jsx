@@ -193,10 +193,16 @@ export const QuizBuilder = () => {
 
   const normaliseImportedQuestion = (raw) => {
     const choices = raw.options || raw.choices || raw.answers || [];
-    const answer = raw.correctAnswer ?? raw.answer ?? raw.correct ?? raw.correctIndex;
+    const answer = raw.correctAnswer ?? raw.correct_answer ?? raw.correctOption ?? raw.correct_option ?? raw.answer ?? raw.correct ?? raw.correctIndex;
+    const answerLabel = String(answer ?? '').trim().replace(/[.)\u060c\u06d4:：-]/g, '').toLocaleLowerCase();
+    const standardLabelIndex = ['a', '1', '\u0627\u0644\u0641', '\u0627'].includes(answerLabel) ? 0
+      : ['b', '2', '\u0628'].includes(answerLabel) ? 1
+      : ['c', '3', '\u062c'].includes(answerLabel) ? 2
+      : ['d', '4', '\u062f'].includes(answerLabel) ? 3
+      : -1;
     const answerIndex = typeof answer === 'number'
       ? answer
-      : choices.findIndex((choice, index) => {
+      : standardLabelIndex >= 0 ? standardLabelIndex : choices.findIndex((choice, index) => {
           const text = typeof choice === 'string' ? choice : choice.text;
           return String(answer || '').trim().toLowerCase() === text?.trim().toLowerCase()
             || String(answer || '').trim().toUpperCase() === String.fromCharCode(65 + index);
@@ -205,7 +211,7 @@ export const QuizBuilder = () => {
       text: typeof choice === 'string' ? choice.trim() : String(choice.text || '').trim(),
       isCorrect: answerIndex === index || Boolean(choice.isCorrect),
     })).filter((choice) => choice.text);
-    return options.length >= 2 && (raw.title || raw.question || raw.prompt)
+    return options.length >= 2 && options.filter((option) => option.isCorrect).length === 1 && (raw.title || raw.question || raw.prompt)
       ? {
           title: String(raw.title || raw.question || raw.prompt).trim(),
           type: 'mcq_single', difficulty: raw.difficulty || 'medium', topicTag: raw.topicTag || 'General',
@@ -223,28 +229,43 @@ export const QuizBuilder = () => {
     } catch {
       const text = pastedQuestions.trim();
       const blankLineBlocks = text.split(/\r?\n\s*\r?\n/).filter(Boolean);
-      // Support a numbered Urdu/English list even when the questions were pasted
-      // without blank lines between them.
+      const answerLinePattern = /^(?:answer|correct answer|correct option|\u062c\u0648\u0627\u0628|\u062f\u0631\u0633\u062a\s+\u062c\u0648\u0627\u0628|\u0635\u062d\u06cc\u062d\s+\u062c\u0648\u0627\u0628)\s*[:：]\s*(.+)$/iu;
+      // ChatGPT often returns 20 questions as one continuous list. An answer
+      // line is an unambiguous boundary, so split after it even without blanks.
+      const answerSeparatedBlocks = [];
+      let currentBlock = [];
+      text.split(/\r?\n/).forEach((line) => {
+        currentBlock.push(line);
+        if (answerLinePattern.test(line.trim().replace(/^(?:[-*•]\s*)+/, ''))) {
+          answerSeparatedBlocks.push(currentBlock.join('\n'));
+          currentBlock = [];
+        }
+      });
+      if (currentBlock.some((line) => line.trim())) answerSeparatedBlocks.push(currentBlock.join('\n'));
+      // Support ChatGPT's named English/Urdu question headings without blank lines.
+      const namedQuestionBlocks = text.split(/\r?\n(?=\s*(?:\*\*)?\s*(?:question|q|\u0633\u0648\u0627\u0644)\s*\d+\s*[:.)])/iu).filter(Boolean);
       const blocks = blankLineBlocks.length > 1
         ? blankLineBlocks
-        : text.split(/\r?\n(?=\s*(?:question\s*)?\d+[.)]\s+[^\n]+)/i).filter(Boolean);
+        : answerSeparatedBlocks.length > 1 ? answerSeparatedBlocks
+        : namedQuestionBlocks.length > 1 ? namedQuestionBlocks : text.split(/\r?\n(?=\s*question\s*\d+\s*[:.)])/i).filter(Boolean);
       imported = blocks.map((block) => {
-        const lines = block.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-        const answerLine = lines.find((line) => /^(answer|correct answer|جواب|درست جواب|صحیح جواب)\s*[:：]/iu.test(line));
+        const lines = block.split(/\r?\n/)
+          .map((line) => line.trim().replace(/^(?:[-*•]\s*)+/, '').replace(/^\*\*(.*?)\*\*$/u, '$1').trim())
+          .filter(Boolean);
+        const answerPattern = answerLinePattern;
+        const answerLine = lines.find((line) => answerPattern.test(line));
         // Accept common English and Urdu option markers, including Urdu full stop
         // (۔), Arabic comma (،), parentheses, and hyphen styles.
-        const optionPattern = /^\s*\(?\s*(الف|ا|ب|ج|د|A|B|C|D|a|b|c|d|1|2|3|4)\s*\)?\s*(?:[.)،۔:：]|[-–—])\s*(.+?)\s*$/u;
+        const optionPattern = /^\s*\(?\s*(\u0627\u0644\u0641|\u0627|\u0628|\u062c|\u062f|A|B|C|D|a|b|c|d|1|2|3|4)\s*\)?\s*(?:[.)\u060c\u06d4:：]|[-–—])\s*(.+?)\s*$/u;
         const optionEntries = lines.map((line, lineIndex) => {
           const match = line.match(optionPattern);
           return match ? { line, lineIndex, label: match[1], text: match[2].trim() } : null;
         }).filter(Boolean);
-        const optionLines = optionEntries.map((entry) => entry.line);
         const options = optionEntries.map((entry) => ({ text: entry.text, isCorrect: false }));
-        const answerMatch = answerLine?.match(/^(?:answer|correct answer|جواب|درست جواب|صحیح جواب)\s*[:：]\s*(.+)$/iu);
+        const answerMatch = answerLine?.match(answerPattern);
         const answer = answerMatch?.[1]?.trim() || '';
-        const cleanAnswer = answer.replace(/[.)،:：-]/g, '').trim().toLocaleLowerCase();
-        const answerIndex = optionEntries.findIndex((entry) => entry.label.toLocaleLowerCase() === cleanAnswer)
-          ?? -1;
+        const cleanAnswer = answer.replace(/[.)\u060c\u06d4:：-]/g, '').trim().toLocaleLowerCase();
+        const answerIndex = optionEntries.findIndex((entry) => entry.label.toLocaleLowerCase() === cleanAnswer);
         const matchedAnswerIndex = answerIndex >= 0
           ? answerIndex
           : options.findIndex((option) => option.text.toLocaleLowerCase() === answer.toLocaleLowerCase());
@@ -254,6 +275,7 @@ export const QuizBuilder = () => {
         // the pasted document uses a different label punctuation style.
         const firstOptionLine = optionEntries[0]?.lineIndex ?? lines.length;
         const title = lines.slice(0, firstOptionLine).filter((line) => line !== answerLine).join(' ')
+          .replace(/^(?:question|q|\u0633\u0648\u0627\u0644)\s*\d+\s*[:.)-]?\s*/iu, '')
           .replace(/^\d+[.)]\s*/, '');
         return normaliseImportedQuestion({ title, options });
       }).filter(Boolean);
@@ -507,7 +529,7 @@ export const QuizBuilder = () => {
               </p>
             </div>
 
-            <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <div className="builder-question-actions" style={{ display: 'flex', gap: '0.75rem' }}>
               <Button variant="secondary" onClick={() => setShowPasteImporter((visible) => !visible)}>
                 <ClipboardPaste size={16} /> Paste Questions
               </Button>
@@ -525,9 +547,27 @@ export const QuizBuilder = () => {
               <div>
                 <h3 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text)' }}>Paste AI Questions</h3>
                 <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-                  Paste JSON or blocks like: question, A. option, B. option, Answer: A. Separate questions with a blank line.
+                  Paste ChatGPT output using either format below. Every question must include exactly one correct answer.
                 </p>
               </div>
+              <details className="bulk-import-formats">
+                <summary>View supported English and Urdu ChatGPT formats</summary>
+                <div className="bulk-import-format-grid">
+                  <div><strong>English</strong><pre>{`Question 1: What is 2 + 2?
+A) 3
+B) 4
+C) 5
+D) 6
+Correct Answer: B`}</pre></div>
+                  <div dir="rtl"><strong>اردو</strong><pre>{`سوال 1: پاکستان کا دارالحکومت کیا ہے؟
+الف) کراچی
+ب) اسلام آباد
+ج) لاہور
+د) پشاور
+درست جواب: ب`}</pre></div>
+                </div>
+                <p>Use a blank line between questions. The importer also accepts <code>Answer: B</code>, <code>جواب: الف</code>, markdown bold text, and JSON from ChatGPT.</p>
+              </details>
               <textarea
                 rows={9}
                 value={pastedQuestions}
@@ -535,7 +575,7 @@ export const QuizBuilder = () => {
                 placeholder={'What is 2 + 2?\nA. 3\nB. 4\nC. 5\nD. 6\nAnswer: B'}
                 style={{ width: '100%', padding: '0.75rem', borderRadius: 'var(--radius-btn)', border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text)', fontFamily: 'inherit', lineHeight: 1.5 }}
               />
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <div className="bulk-import-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
                 <Button variant="secondary" onClick={() => setShowPasteImporter(false)}>Cancel</Button>
                 <Button onClick={importPastedQuestions}>Add Pasted Questions</Button>
               </div>
