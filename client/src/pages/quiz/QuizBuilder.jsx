@@ -228,6 +228,12 @@ export const QuizBuilder = () => {
       imported = (Array.isArray(parsed) ? parsed : parsed.questions || []).map(normaliseImportedQuestion).filter(Boolean);
     } catch {
       const text = pastedQuestions.trim();
+      const cleanPasteLine = (line) => String(line)
+        .trim()
+        .replace(/^(?:[-*•]\s*)+/, '')
+        .replace(/\*\*/g, '')
+        .replace(/^`|`$/g, '')
+        .trim();
       const blankLineBlocks = text.split(/\r?\n\s*\r?\n/).filter(Boolean);
       const answerLinePattern = /^(?:answer|correct answer|correct option|\u062c\u0648\u0627\u0628|\u062f\u0631\u0633\u062a\s+\u062c\u0648\u0627\u0628|\u0635\u062d\u06cc\u062d\s+\u062c\u0648\u0627\u0628)\s*[:：]\s*(.+)$/iu;
       // ChatGPT often returns 20 questions as one continuous list. An answer
@@ -236,7 +242,7 @@ export const QuizBuilder = () => {
       let currentBlock = [];
       text.split(/\r?\n/).forEach((line) => {
         currentBlock.push(line);
-        if (answerLinePattern.test(line.trim().replace(/^(?:[-*•]\s*)+/, ''))) {
+        if (answerLinePattern.test(cleanPasteLine(line))) {
           answerSeparatedBlocks.push(currentBlock.join('\n'));
           currentBlock = [];
         }
@@ -250,13 +256,13 @@ export const QuizBuilder = () => {
         : namedQuestionBlocks.length > 1 ? namedQuestionBlocks : text.split(/\r?\n(?=\s*question\s*\d+\s*[:.)])/i).filter(Boolean);
       imported = blocks.map((block) => {
         const lines = block.split(/\r?\n/)
-          .map((line) => line.trim().replace(/^(?:[-*•]\s*)+/, '').replace(/^\*\*(.*?)\*\*$/u, '$1').trim())
+          .map(cleanPasteLine)
           .filter(Boolean);
         const answerPattern = answerLinePattern;
         const answerLine = lines.find((line) => answerPattern.test(line));
         // Accept common English and Urdu option markers, including Urdu full stop
         // (۔), Arabic comma (،), parentheses, and hyphen styles.
-        const optionPattern = /^\s*\(?\s*(\u0627\u0644\u0641|\u0627|\u0628|\u062c|\u062f|A|B|C|D|a|b|c|d|1|2|3|4)\s*\)?\s*(?:[.)\u060c\u06d4:：]|[-–—])\s*(.+?)\s*$/u;
+        const optionPattern = /^\s*(?:(?:option|choice|\u0622\u067e\u0634\u0646)\s*)?\(?\s*(\u0627\u0644\u0641|\u0627|\u0628|\u062c|\u062f|A|B|C|D|a|b|c|d|1|2|3|4)\s*\)?\s*(?:[.)\u060c\u06d4:：]|[-–—])\s*(.+?)\s*$/iu;
         const optionEntries = lines.map((line, lineIndex) => {
           const match = line.match(optionPattern);
           return match ? { line, lineIndex, label: match[1], text: match[2].trim() } : null;
@@ -274,7 +280,9 @@ export const QuizBuilder = () => {
         // This prevents an Urdu option from being appended to the question when
         // the pasted document uses a different label punctuation style.
         const firstOptionLine = optionEntries[0]?.lineIndex ?? lines.length;
-        const title = lines.slice(0, firstOptionLine).filter((line) => line !== answerLine).join(' ')
+        const title = lines.slice(0, firstOptionLine)
+          .filter((line) => line !== answerLine && !/^(?:options?|choices|\u0622\u067e\u0634\u0646\u0632?|\u0627\u062e\u062a\u06cc\u0627\u0631\u0627\u062a)\s*[:：]?$/iu.test(line))
+          .join(' ')
           .replace(/^(?:question|q|\u0633\u0648\u0627\u0644)\s*\d+\s*[:.)-]?\s*/iu, '')
           .replace(/^\d+[.)]\s*/, '');
         return normaliseImportedQuestion({ title, options });
@@ -365,9 +373,10 @@ export const QuizBuilder = () => {
           </h1>
         </div>
 
-        <Button onClick={() => setIsAIModalOpen(true)}>
-          <Wand2 size={18} /> Generate Questions with AI
-        </Button>
+        <div className="builder-header-actions">
+          <Button variant="secondary" onClick={() => navigate('/dashboard')}><ArrowLeft size={18} /> Back to dashboard</Button>
+          <Button onClick={() => setIsAIModalOpen(true)}><Wand2 size={18} /> Generate Questions with AI</Button>
+        </div>
       </div>
 
       {/* Stepper Progress Bar */}
