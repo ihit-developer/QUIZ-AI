@@ -221,24 +221,39 @@ export const QuizBuilder = () => {
       const parsed = JSON.parse(pastedQuestions);
       imported = (Array.isArray(parsed) ? parsed : parsed.questions || []).map(normaliseImportedQuestion).filter(Boolean);
     } catch {
-      const blocks = pastedQuestions.trim().split(/\r?\n\s*\r?\n/);
+      const text = pastedQuestions.trim();
+      const blankLineBlocks = text.split(/\r?\n\s*\r?\n/).filter(Boolean);
+      // Support a numbered Urdu/English list even when the questions were pasted
+      // without blank lines between them.
+      const blocks = blankLineBlocks.length > 1
+        ? blankLineBlocks
+        : text.split(/\r?\n(?=\s*(?:question\s*)?\d+[.)]\s+[^\n]+)/i).filter(Boolean);
       imported = blocks.map((block) => {
         const lines = block.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-        const answerLine = lines.find((line) => /^(answer|correct answer)\s*:/i.test(line));
-        const optionLines = lines.filter((line) => /^[A-Da-d][.)]\s+/.test(line));
-        const options = optionLines.map((line) => ({ text: line.replace(/^[A-Da-d][.)]\s+/, ''), isCorrect: false }));
-        const answer = answerLine?.replace(/^(answer|correct answer)\s*:\s*/i, '').trim();
-        const answerIndex = /^[A-D]$/i.test(answer || '')
-          ? answer.toUpperCase().charCodeAt(0) - 65
-          : options.findIndex((option) => option.text.toLowerCase() === String(answer || '').toLowerCase());
-        if (answerIndex >= 0) options[answerIndex].isCorrect = true;
+        const answerLine = lines.find((line) => /^(answer|correct answer|جواب|درست جواب|صحیح جواب)\s*[:：]/iu.test(line));
+        const optionPattern = /^(A|B|C|D|a|b|c|d|1|2|3|4|الف|ا|ب|ج|د)\s*[.)،:：-]\s*(.+)$/u;
+        const optionEntries = lines.map((line) => {
+          const match = line.match(optionPattern);
+          return match ? { line, label: match[1], text: match[2].trim() } : null;
+        }).filter(Boolean);
+        const optionLines = optionEntries.map((entry) => entry.line);
+        const options = optionEntries.map((entry) => ({ text: entry.text, isCorrect: false }));
+        const answerMatch = answerLine?.match(/^(?:answer|correct answer|جواب|درست جواب|صحیح جواب)\s*[:：]\s*(.+)$/iu);
+        const answer = answerMatch?.[1]?.trim() || '';
+        const cleanAnswer = answer.replace(/[.)،:：-]/g, '').trim().toLocaleLowerCase();
+        const answerIndex = optionEntries.findIndex((entry) => entry.label.toLocaleLowerCase() === cleanAnswer)
+          ?? -1;
+        const matchedAnswerIndex = answerIndex >= 0
+          ? answerIndex
+          : options.findIndex((option) => option.text.toLocaleLowerCase() === answer.toLocaleLowerCase());
+        if (matchedAnswerIndex >= 0) options[matchedAnswerIndex].isCorrect = true;
         const title = lines.filter((line) => !optionLines.includes(line) && line !== answerLine).join(' ')
           .replace(/^\d+[.)]\s*/, '');
         return normaliseImportedQuestion({ title, options });
       }).filter(Boolean);
     }
     if (!imported.length) {
-      toast.error('Could not find valid multiple-choice questions. Include at least two options and an Answer: A line.');
+      toast.error('Could not find valid questions. Use A/B/C/D or الف/ب/ج/د options and Answer: A or جواب: الف.');
       return;
     }
     setQuestions((current) => [...current, ...imported]);
