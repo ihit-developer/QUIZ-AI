@@ -17,7 +17,8 @@ export const MainLayout = ({ children }) => {
   const { user, logout } = useAuth();
   const isAuthPage = location.pathname === '/login' || location.pathname === '/register';
   const isWorkspace = Boolean(user) && appPaths.some((path) => location.pathname.startsWith(path));
-  const isHost = user?.role === 'host' || user?.role === 'admin';
+  const isHost = user?.role === 'host';
+  const isAdmin = user?.role === 'admin';
 
   if (isAuthPage) return <main className="auth-shell">{children}</main>;
 
@@ -29,10 +30,11 @@ export const MainLayout = ({ children }) => {
           <p className="workspace-rail-label">Workspace</p>
           <nav className="workspace-rail-nav">
             <RailLink to="/dashboard" label="Dashboard" icon={LayoutDashboard} active={location.pathname === '/dashboard'} />
-            {isHost ? <RailLink to="/create-quiz" label="Create quiz" icon={CirclePlus} active={location.pathname.startsWith('/create-quiz') || location.pathname.startsWith('/edit-quiz')} /> : <RailLink to="/join" label="Join a quiz" icon={Compass} active={location.pathname.startsWith('/join')} />}
+            {isHost && <RailLink to="/create-quiz" label="Create quiz" icon={CirclePlus} active={location.pathname.startsWith('/create-quiz') || location.pathname.startsWith('/edit-quiz')} />}
+            {!isHost && !isAdmin && <RailLink to="/join" label="Join a quiz" icon={Compass} active={location.pathname.startsWith('/join')} />}
             {isHost && <RailLink to="/analytics" label="Analytics" icon={BarChart3} active={location.pathname.startsWith('/analytics')} />}
             <RailLink to="/predictions" label="AI insights" icon={BrainCircuit} active={location.pathname.startsWith('/predictions')} />
-            {user?.role === 'admin' && <RailLink to="/admin" label="Administration" icon={ShieldCheck} active={location.pathname.startsWith('/admin')} />}
+            {isAdmin && <RailLink to="/admin" label="Administration" icon={ShieldCheck} active={location.pathname.startsWith('/admin')} />}
           </nav>
           <div className="workspace-rail-bottom">
             <RailLink to="/profile" label="Profile & settings" icon={UserRound} active={location.pathname.startsWith('/profile')} />

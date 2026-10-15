@@ -116,19 +116,19 @@ export const AdminDashboard = () => {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.25rem' }}>
         <StatCard
           title="Total Users"
-          value={stats?.totalUsers || users.length}
+          value={stats?.totalUsers ?? users.length}
           description="Registered profiles"
           icon={Users}
         />
         <StatCard
           title="Active Quizzes"
-          value={stats?.totalQuizzes || '24'}
+          value={stats?.activeQuizzes ?? 0}
           description="Live & self-paced"
           icon={FileQuestion}
         />
         <StatCard
           title="Completed Attempts"
-          value={stats?.totalAttempts || '142'}
+          value={stats?.totalAttempts ?? 0}
           description="Recorded submissions"
           icon={Activity}
         />

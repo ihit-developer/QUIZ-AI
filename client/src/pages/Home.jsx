@@ -27,8 +27,7 @@ export const Home = () => {
         <span className="landing-kicker"><Sparkles size={14} /> Assessment workspace</span>
         <h1>Make every quiz<br /><em>clear, active, and useful.</em></h1>
         <p>Quizese brings quiz creation, live participation, and performance review into one focused workspace for hosts and learners.</p>
-        {host ? <div className="landing-actions"><Link className="btn-primary" to="/create-quiz">Create a quiz <ArrowRight size={17} /></Link><Link className="landing-text-link" to="/dashboard">Open workspace</Link></div> : <form className="landing-join" onSubmit={join}><QrCode size={20} /><input value={code} onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6))} placeholder="Enter a quiz code" aria-label="Quiz join code" /><button className="btn-primary" type="submit">Join <ArrowRight size={16} /></button></form>}
-        {!user && <p className="landing-note">Want to create quizzes? <Link to="/register">Create a host account</Link>.</p>}
+        {!user ? <div className="landing-actions"><Link className="btn-primary" to="/login">Sign in <ArrowRight size={17} /></Link><Link className="landing-text-link" to="/register">Create account</Link></div> : host ? <div className="landing-actions"><Link className="btn-primary" to="/create-quiz">Create a quiz <ArrowRight size={17} /></Link><Link className="landing-text-link" to="/dashboard">Open workspace</Link></div> : <form className="landing-join" onSubmit={join}><QrCode size={20} /><input value={code} onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6))} placeholder="Enter a quiz code" aria-label="Quiz join code" /><button className="btn-primary" type="submit">Join <ArrowRight size={16} /></button></form>}
       </div>
       <div className="landing-visual" aria-hidden="true">
         <div className="landing-orbit orbit-one" /><div className="landing-orbit orbit-two" />

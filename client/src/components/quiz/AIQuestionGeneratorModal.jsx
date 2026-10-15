@@ -5,7 +5,7 @@ import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import toast from 'react-hot-toast';
 
-export const AIQuestionGeneratorModal = ({ isOpen, onClose, onQuestionsGenerated }) => {
+export const AIQuestionGeneratorModal = ({ isOpen, onClose, onQuestionsGenerated, language = 'English' }) => {
   const [topic, setTopic] = useState('Computer Science & Web Development');
   const [difficulty, setDifficulty] = useState('medium');
   const [count, setCount] = useState(5);
@@ -28,6 +28,7 @@ export const AIQuestionGeneratorModal = ({ isOpen, onClose, onQuestionsGenerated
         difficulty,
         count: Number(count),
         contextText,
+        language,
       });
 
       if (res.success && res.data.questions) {

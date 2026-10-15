@@ -7,13 +7,13 @@ const { writeAuditLog, getMemoryAuditLogs } = require('../services/auditService'
 // 1. Get Platform Metrics
 const getAdminStats = async (req, res, next) => {
   try {
-    let totalUsers = 1;
+    let totalUsers = 0;
     let activeQuizzes = 0;
     let totalAttempts = 0;
 
     try {
       totalUsers = await User.countDocuments();
-      activeQuizzes = await Quiz.countDocuments();
+      activeQuizzes = await Quiz.countDocuments({ status: 'published' });
       const Attempt = require('../models/Attempt');
       totalAttempts = await Attempt.countDocuments();
     } catch {

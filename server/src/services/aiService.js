@@ -13,11 +13,12 @@ class AIService {
     }
   }
 
-  async generateQuestions({ topic, difficulty = 'medium', count = 5, contextText = '' }) {
+  async generateQuestions({ topic, difficulty = 'medium', count = 5, contextText = '', language = 'English' }) {
     if (this.client) {
       try {
         const prompt = `You are an expert instructional designer and quiz author.
 Create ${count} high-quality ${difficulty} level multiple choice assessment questions on the topic: "${topic}".
+Write every question, answer option, and explanation in ${language === 'Urdu' ? 'Urdu using Urdu script' : 'English'}.
 ${contextText ? `Use this reference material:\n${contextText}\n` : ''}
 
 You MUST output ONLY a valid JSON array of objects without markdown formatting, code fences or preamble:

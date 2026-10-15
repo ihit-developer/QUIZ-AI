@@ -46,6 +46,7 @@ export const QuizBuilder = () => {
     title: '',
     description: '',
     category: 'Computer Science',
+    language: 'English',
     mode: 'self_paced',
   });
 
@@ -100,6 +101,7 @@ export const QuizBuilder = () => {
               title: q.title || '',
               description: q.description || '',
               category: q.category || 'Computer Science',
+              language: q.language || 'English',
               mode: q.mode || 'self_paced',
             });
             if (q.settings) setSettings(q.settings);
@@ -264,6 +266,7 @@ export const QuizBuilder = () => {
         title: details.title,
         description: details.description,
         category: details.category,
+        language: details.language,
         mode: details.mode,
         settings,
         schedule: { endsAt: schedule.endsAt ? new Date(schedule.endsAt).toISOString() : null },
@@ -427,6 +430,15 @@ export const QuizBuilder = () => {
                 <option value="Business">Business Administration</option>
                 <option value="Medical">Medical Sciences</option>
                 <option value="Other">General Knowledge</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text)', marginBottom: '0.35rem' }}>
+                Quiz Language
+              </label>
+              <select value={details.language} onChange={(e) => setDetails({ ...details, language: e.target.value })} style={{ width: '100%', backgroundColor: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-btn)', padding: '0.75rem 1rem', color: 'var(--text)', fontSize: '0.95rem', minHeight: '44px' }}>
+                <option value="English">English</option>
+                <option value="Urdu">Urdu (اردو)</option>
               </select>
             </div>
           </div>
@@ -910,6 +922,7 @@ export const QuizBuilder = () => {
         isOpen={isAIModalOpen}
         onClose={() => setIsAIModalOpen(false)}
         onQuestionsGenerated={handleAIQuestions}
+        language={details.language}
       />
 
       {/* Share Modal */}

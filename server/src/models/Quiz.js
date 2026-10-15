@@ -18,6 +18,11 @@ const quizSchema = new mongoose.Schema(
       default: 'General Knowledge',
       trim: true,
     },
+    language: {
+      type: String,
+      enum: ['English', 'Urdu'],
+      default: 'English',
+    },
     hostId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',

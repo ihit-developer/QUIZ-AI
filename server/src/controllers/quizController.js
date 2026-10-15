@@ -117,7 +117,7 @@ seedDemoQuiz();
 // 1. Create or Draft Quiz
 const createQuiz = async (req, res, next) => {
   try {
-    const { title, description, category, mode, settings, schedule, questions, tags } = req.body;
+    const { title, description, category, language, mode, settings, schedule, questions, tags } = req.body;
     const hostId = req.user._id || req.user.id;
 
     // Generate unique 6-character join code
@@ -134,6 +134,7 @@ const createQuiz = async (req, res, next) => {
         title,
         description,
         category,
+        language: language === 'Urdu' ? 'Urdu' : 'English',
         hostId,
         joinCode,
         qrCodeDataUrl,
@@ -162,6 +163,7 @@ const createQuiz = async (req, res, next) => {
         title,
         description,
         category,
+        language: language === 'Urdu' ? 'Urdu' : 'English',
         hostId,
         joinCode,
         qrCodeDataUrl,
@@ -326,12 +328,13 @@ const getAvailableSelfPacedQuizzes = async (req, res, next) => {
 // 4. AI Question Generation Endpoint
 const generateAIQuestions = async (req, res, next) => {
   try {
-    const { topic, difficulty, count, contextText } = req.body;
+    const { topic, difficulty, count, contextText, language } = req.body;
     const questions = await aiService.generateQuestions({
       topic,
       difficulty,
       count: Number(count) || 5,
       contextText,
+      language: language === 'Urdu' ? 'Urdu' : 'English',
     });
 
     res.status(200).json({
@@ -385,7 +388,7 @@ const getQuizById = async (req, res, next) => {
 const updateQuiz = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { title, description, category, mode, settings, schedule, questions, status } = req.body;
+    const { title, description, category, language, mode, settings, schedule, questions, status } = req.body;
     const userId = req.user._id || req.user.id;
 
     let quiz = null;
@@ -413,6 +416,7 @@ const updateQuiz = async (req, res, next) => {
           title: title || quiz.title,
           description: description !== undefined ? description : quiz.description,
           category: category || quiz.category,
+          language: language === 'Urdu' ? 'Urdu' : (language === 'English' ? 'English' : quiz.language),
           mode: mode || quiz.mode,
           settings: settings || quiz.settings,
           schedule: schedule || quiz.schedule,
@@ -437,6 +441,7 @@ const updateQuiz = async (req, res, next) => {
       if (title) quiz.title = title;
       if (description !== undefined) quiz.description = description;
       if (category) quiz.category = category;
+      if (language === 'Urdu' || language === 'English') quiz.language = language;
       if (mode) quiz.mode = mode;
       if (settings) quiz.settings = settings;
       if (schedule) quiz.schedule = schedule;

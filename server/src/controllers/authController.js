@@ -285,20 +285,36 @@ const verifyEmail = async (req, res, next) => {
     }
     let user;
     try {
-      // Store the verified password hash atomically. The old temporary-password
-      // flow could leave a temporary password in MongoDB after a partial error.
-      user = await User.create({ name: pending.name, email: pending.email, password: pending.passwordHash, role: pending.role, isEmailVerified: true });
+      if (pending.googleId) {
+        user = await User.findOne({ $or: [{ googleId: pending.googleId }, { email: pending.email }] });
+        if (!user) {
+          user = await User.create({ name: pending.name, email: pending.email, password: `google-${createOtp()}-${Date.now()}`, role: pending.role, googleId: pending.googleId, isEmailVerified: true, avatar: pending.avatar || '' });
+        } else {
+          user.googleId = pending.googleId;
+          user.isEmailVerified = true;
+          if (pending.avatar && !user.avatar) user.avatar = pending.avatar;
+          await user.save();
+        }
+      } else {
+        // Store the verified password hash atomically. The old temporary-password
+        // flow could leave a temporary password in MongoDB after a partial error.
+        user = await User.create({ name: pending.name, email: pending.email, password: pending.passwordHash, role: pending.role, isEmailVerified: true });
+      }
       // Deleting the consumed OTP is cleanup only. A cleanup failure must never
       // replace a real saved user with an in-memory user.
       try { await PendingRegistration.deleteOne({ _id: pending._id }); }
       catch (cleanupError) { console.error('[Auth] Unable to remove consumed verification code:', cleanupError.message); }
     } catch (error) {
       if (isProductionDeployment) throw error;
-      user = { id: 'user_' + Date.now(), _id: 'user_' + Date.now(), name: pending.name, email: pending.email, password: pending.passwordHash, role: pending.role, isEmailVerified: true, bio: '', avatar: '' };
+      user = { id: 'user_' + Date.now(), _id: 'user_' + Date.now(), name: pending.name, email: pending.email, password: pending.passwordHash || '', role: pending.role, googleId: pending.googleId || '', isEmailVerified: true, bio: '', avatar: pending.avatar || '' };
       memoryUsers.set(email, user); pendingRegistrations.delete(email);
     }
     const accessToken = signAccessToken(user);
     res.cookie('refreshToken', signRefreshToken(user), cookieOptions);
+    if (pending.googleId) {
+      sendLoginAlert({ email: user.email, name: user.name }).catch(() => {});
+      await writeAuditLog({ user, action: 'USER_SIGNED_IN', resource: 'Account sign-in', details: { method: 'google_otp' }, req });
+    }
     res.status(200).json({ success: true, data: { user: publicUser(user), accessToken } });
   } catch (error) { next(error); }
 };
@@ -378,17 +394,26 @@ const googleCallback = async (req, res, next) => {
     const profile = await profileResponse.json();
     if (!profileResponse.ok || !profile.email_verified) throw new Error('Google did not provide a verified email address');
     const requestedRole = readGoogleStateRole(req.query.state);
-    let user;
-    try { user = await User.findOne({ $or: [{ googleId: profile.sub }, { email: profile.email }] }); } catch { user = memoryUsers.get(profile.email); }
-    if (!user) {
-      try { user = await User.create({ name: profile.name || profile.email.split('@')[0], email: profile.email, password: `google-${createOtp()}-${Date.now()}`, role: requestedRole, googleId: profile.sub, isEmailVerified: true, avatar: profile.picture || '' }); }
-      catch { user = { id: `google_${Date.now()}`, _id: `google_${Date.now()}`, name: profile.name || profile.email.split('@')[0], email: profile.email, password: '', role: requestedRole, googleId: profile.sub, isEmailVerified: true, avatar: profile.picture || '', bio: '' }; memoryUsers.set(profile.email, user); }
-    } else if (!user.googleId) { user.googleId = profile.sub; if (user.save) await user.save(); }
-    const accessToken = signAccessToken(user);
-    res.cookie('refreshToken', signRefreshToken(user), cookieOptions);
-    sendLoginAlert({ email: user.email, name: user.name }).catch(() => {});
-    await writeAuditLog({ user, action: 'USER_SIGNED_IN', resource: 'Account sign-in', details: { method: 'google' }, req });
-    res.redirect(`${clientUrl}/login?googleToken=${encodeURIComponent(accessToken)}`);
+    let existingUser;
+    try { existingUser = await User.findOne({ $or: [{ googleId: profile.sub }, { email: profile.email }] }); } catch { existingUser = memoryUsers.get(profile.email); }
+    const email = normalizeEmail(profile.email);
+    const pending = {
+      name: profile.name || existingUser?.name || email.split('@')[0],
+      email,
+      role: existingUser?.role === 'host' ? 'host' : requestedRole,
+      googleId: profile.sub,
+      avatar: profile.picture || '',
+      code: createOtp(),
+      expiresAt: otpExpiry(),
+    };
+    try {
+      await PendingRegistration.findOneAndUpdate({ email }, pending, { upsert: true, new: true, setDefaultsOnInsert: true });
+    } catch (error) {
+      if (isProductionDeployment) throw error;
+      pendingRegistrations.set(email, pending);
+    }
+    await sendOtpEmail({ email, code: pending.code, purpose: 'verification', name: pending.name });
+    res.redirect(`${clientUrl}/register?googleVerification=1&email=${encodeURIComponent(email)}`);
   } catch (error) { next(error); }
 };
 
