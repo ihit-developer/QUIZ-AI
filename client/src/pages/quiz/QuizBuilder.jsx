@@ -27,7 +27,7 @@ import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import toast from 'react-hot-toast';
 
-export const QuizBuilder = () => {
+const QuizBuilderContent = () => {
   const navigate = useNavigate();
   const { id: editQuizId } = useParams();
   const isEditMode = Boolean(editQuizId);
@@ -1015,3 +1015,17 @@ Correct Answer: B`}</pre></div>
     </div>
   );
 };
+
+class QuizBuilderErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { failed: false }; }
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(error) { console.error('Quiz builder error:', error); }
+  render() {
+    if (this.state.failed) {
+      return <div className="app-page" style={{ maxWidth: 680, margin: '3rem auto', textAlign: 'center' }}><Card style={{ padding: '2rem' }}><h1 style={{ color: 'var(--text)' }}>Quiz creator could not open</h1><p style={{ color: 'var(--text-muted)', margin: '0.75rem 0 1.25rem' }}>Please return to the dashboard and try again. Your existing quizzes are safe.</p><Button onClick={() => window.location.assign('/dashboard')}>Back to dashboard</Button></Card></div>;
+    }
+    return this.props.children;
+  }
+}
+
+export const QuizBuilder = () => <QuizBuilderErrorBoundary><QuizBuilderContent /></QuizBuilderErrorBoundary>;

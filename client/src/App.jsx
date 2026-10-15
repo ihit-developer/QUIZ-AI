@@ -1,5 +1,5 @@
 import React, { lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Link } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { ThemeProvider } from './context/ThemeContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -41,7 +41,7 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
   }
 
   if (allowedRoles && !allowedRoles.includes(user.role)) {
-    return <Navigate to="/dashboard" replace />;
+    return <div className="app-page" style={{ maxWidth: 620, margin: '3rem auto', textAlign: 'center' }}><h1 style={{ color: 'var(--text)' }}>This page is for host accounts</h1><p style={{ color: 'var(--text-muted)', margin: '0.75rem 0 1.25rem' }}>Your account is currently a {user.role}. Ask an administrator to change your role to host if you need to create quizzes.</p><Link className="btn-primary" to="/dashboard">Back to dashboard</Link></div>;
   }
 
   return children;
