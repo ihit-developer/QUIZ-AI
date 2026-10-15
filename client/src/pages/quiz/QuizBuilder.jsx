@@ -230,7 +230,9 @@ const QuizBuilderContent = () => {
       // Some Android/iPhone clipboard sources flatten a multi-line ChatGPT
       // answer into one line. Restore line boundaries before parsing so the
       // first option can never be appended to the question title.
-      const markerBoundary = /\s+(?=(?:(?:option|choice|\u0622\u067e\u0634\u0646)\s*)?\(?\s*(?:\u0627\u0644\u0641|\u0627|\u0628|\u062c|\u062f|A|B|C|D|a|b|c|d|1|2|3|4)\s*\)?\s*(?:[.)\u060c\u06d4:：]|[-–—])|(?:answer|correct answer|correct option|\u062c\u0648\u0627\u0628|\u062f\u0631\u0633\u062a\s+\u062c\u0648\u0627\u0628|\u0635\u062d\u06cc\u062d\s+\u062c\u0648\u0627\u0628)\s*[:：]))/giu;
+      const optionMarker = '(?:(?:option|choice|\\u0622\\u067e\\u0634\\u0646)\\s*)?\\(?\\s*(?:\\u0627\\u0644\\u0641|\\u0627|\\u0628|\\u062c|\\u062f|A|B|C|D|a|b|c|d|1|2|3|4)\\s*\\)?\\s*(?:[.)\\u060c\\u06d4:：]|[-–—])';
+      const answerMarker = '(?:answer|correct answer|correct option|\\u062c\\u0648\\u0627\\u0628|\\u062f\\u0631\\u0633\\u062a\\s+\\u062c\\u0648\\u0627\\u0628|\\u0635\\u062d\\u06cc\\u062d\\s+\\u062c\\u0648\\u0627\\u0628)\\s*[:：]';
+      const markerBoundary = new RegExp(`\\s+(?=(?:${optionMarker}|${answerMarker}))`, 'giu');
       const text = pastedQuestions.trim().replace(markerBoundary, '\n');
       const cleanPasteLine = (line) => String(line)
         .trim()
