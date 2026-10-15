@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useEffect } from 'react';
+import React, { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { ThemeProvider } from './context/ThemeContext';
@@ -48,27 +48,6 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
 };
 
 export function App() {
-  useEffect(() => {
-    // Fetch route code only when the browser is idle. Subsequent navigation is
-    // instant because the chunks are already in the browser cache.
-    const preload = () => {
-      import('./pages/auth/Login');
-      import('./pages/auth/Register');
-      import('./pages/quiz/Join');
-      import('./pages/dashboard/Dashboard');
-      import('./pages/dashboard/Profile');
-      import('./pages/quiz/LiveRoom');
-      import('./pages/quiz/AttemptRoom');
-      import('./pages/quiz/Results');
-      import('./pages/quiz/AIPredictions');
-      import('./pages/quiz/HostAnalytics');
-    };
-    const idleId = window.requestIdleCallback
-      ? window.requestIdleCallback(preload, { timeout: 1500 })
-      : window.setTimeout(preload, 900);
-    return () => (window.cancelIdleCallback ? window.cancelIdleCallback(idleId) : window.clearTimeout(idleId));
-  }, []);
-
   return (
     <ThemeProvider>
       <AuthProvider>

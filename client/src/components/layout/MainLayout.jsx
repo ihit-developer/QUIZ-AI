@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { BarChart3, BrainCircuit, CirclePlus, Compass, LayoutDashboard, Settings2, ShieldCheck, Sparkles, UserRound } from 'lucide-react';
+import { BarChart3, BrainCircuit, CirclePlus, Compass, LayoutDashboard, LogOut, Settings2, ShieldCheck, Sparkles, UserRound } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Navbar } from './Navbar';
 
@@ -14,7 +14,7 @@ const RailLink = ({ to, label, icon: Icon, active }) => (
 
 export const MainLayout = ({ children }) => {
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const isAuthPage = location.pathname === '/login' || location.pathname === '/register';
   const isWorkspace = Boolean(user) && appPaths.some((path) => location.pathname.startsWith(path));
   const isHost = user?.role === 'host' || user?.role === 'admin';
@@ -28,7 +28,7 @@ export const MainLayout = ({ children }) => {
           <Link to="/" className="workspace-brand" aria-label="Quizese home"><span className="workspace-brand-mark"><Sparkles size={18} /></span><span>quizese</span></Link>
           <p className="workspace-rail-label">Workspace</p>
           <nav className="workspace-rail-nav">
-            <RailLink to="/dashboard" label="Overview" icon={LayoutDashboard} active={location.pathname === '/dashboard'} />
+            <RailLink to="/dashboard" label="Dashboard" icon={LayoutDashboard} active={location.pathname === '/dashboard'} />
             {isHost ? <RailLink to="/create-quiz" label="Create quiz" icon={CirclePlus} active={location.pathname.startsWith('/create-quiz') || location.pathname.startsWith('/edit-quiz')} /> : <RailLink to="/join" label="Join a quiz" icon={Compass} active={location.pathname.startsWith('/join')} />}
             {isHost && <RailLink to="/analytics" label="Analytics" icon={BarChart3} active={location.pathname.startsWith('/analytics')} />}
             <RailLink to="/predictions" label="AI insights" icon={BrainCircuit} active={location.pathname.startsWith('/predictions')} />
@@ -37,6 +37,7 @@ export const MainLayout = ({ children }) => {
           <div className="workspace-rail-bottom">
             <RailLink to="/profile" label="Profile & settings" icon={UserRound} active={location.pathname.startsWith('/profile')} />
             <span className="workspace-role"><Settings2 size={14} /> {user?.role}</span>
+            <button type="button" className="workspace-logout" onClick={logout}><LogOut size={17} /> Log out</button>
           </div>
         </aside>
       )}
