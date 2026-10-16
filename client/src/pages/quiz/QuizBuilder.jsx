@@ -224,74 +224,158 @@ const QuizBuilderContent = () => {
   const importPastedQuestions = () => {
     let imported = [];
     try {
-      const parsed = JSON.parse(pastedQuestions);
+      const parsed = JSON.parse(pastedQuestions.trim());
       imported = (Array.isArray(parsed) ? parsed : parsed.questions || []).map(normaliseImportedQuestion).filter(Boolean);
     } catch {
-      // Some Android/iPhone clipboard sources flatten a multi-line ChatGPT
-      // answer into one line. Restore line boundaries before parsing so the
-      // first option can never be appended to the question title.
-      const optionMarker = '(?:(?:option|choice|\\u0622\\u067e\\u0634\\u0646)\\s*)?\\(?\\s*(?:\\u0627\\u0644\\u0641|\\u0627|\\u0628|\\u062c|\\u062f|A|B|C|D|a|b|c|d|1|2|3|4)\\s*\\)?\\s*(?:[.)\\u060c\\u06d4:：]|[-–—])';
-      const answerMarker = '(?:answer|correct answer|correct option|\\u062c\\u0648\\u0627\\u0628|\\u062f\\u0631\\u0633\\u062a\\s+\\u062c\\u0648\\u0627\\u0628|\\u0635\\u062d\\u06cc\\u062d\\s+\\u062c\\u0648\\u0627\\u0628)\\s*[:：]';
-      const markerBoundary = new RegExp(`\\s+(?=(?:${optionMarker}|${answerMarker}))`, 'giu');
-      const text = pastedQuestions.trim().replace(markerBoundary, '\n');
-      const cleanPasteLine = (line) => String(line)
-        .trim()
-        .replace(/^(?:[-*•]\s*)+/, '')
+      let text = pastedQuestions
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
         .replace(/\*\*/g, '')
-        .replace(/^`|`$/g, '')
+        .replace(/`/g, '')
         .trim();
-      const blankLineBlocks = text.split(/\r?\n\s*\r?\n/).filter(Boolean);
-      const answerLinePattern = /^(?:answer|correct answer|correct option|\u062c\u0648\u0627\u0628|\u062f\u0631\u0633\u062a\s+\u062c\u0648\u0627\u0628|\u0635\u062d\u06cc\u062d\s+\u062c\u0648\u0627\u0628)\s*[:：]\s*(.+)$/iu;
-      // ChatGPT often returns 20 questions as one continuous list. An answer
-      // line is an unambiguous boundary, so split after it even without blanks.
-      const answerSeparatedBlocks = [];
-      let currentBlock = [];
-      text.split(/\r?\n/).forEach((line) => {
-        currentBlock.push(line);
-        if (answerLinePattern.test(cleanPasteLine(line))) {
-          answerSeparatedBlocks.push(currentBlock.join('\n'));
-          currentBlock = [];
+
+      const num = '(?:\\d+|[\\u06F0-\\u06F9]+|[\\u0660-\\u0669]+)';
+
+      // 1. Separate questions on the same line as previous answer/content
+      text = text.replace(
+        new RegExp(`(\\S)\\s+(?=(?:\\u0633\\u0648\\u0627\\u0644|\\bquestion\\b|\\bq\\b)\\s*${num}?\\s*[:.)-]?|${num}\\s*[.)-]\\s+)`, 'giu'),
+        '$1\n\n'
+      );
+
+      // 2. Separate inline answer appended to the last option on the same line
+      const inlineAnsRegex = /(?<!(?:درست|صحیح))\s*(?:[;؛|•*]|\s+)(?=(?:درست\s+جواب|صحیح\s+جواب|جواب|correct\s+answer|correct\s+option|answer)\s*[:：(]?)/giu;
+      text = text.replace(inlineAnsRegex, '\n');
+
+      // 3. Separate inline options on the same line as question or previous option
+      const optPunct = '[:.)\\]\\u06d4\\u060c–—\\-]';
+      const optMarker = `(?:[（(\\[]\\s*(?:[A-Da-d]|\\u0627\\u0644\\u0641|\\u0627|\\u0628|\\u062c|\\u062f)\\s*[）)\\]]|(?:\\b[A-Da-d]|\\u0627\\u0644\\u0641|\\u0627|\\u0628|\\u062c|\\u062f)\\s*${optPunct})`;
+      const inlineOptRegex = new RegExp(`(\\S)(?:[?؟:;؛]?\\s*|\\s+)(?=${optMarker}\\s*)`, 'gu');
+
+      const ansLineStart = /^\s*(?:درست\s+جواب|صحیح\s+جواب|جواب|correct\s+answer|correct\s+option|answer)\s*[:：(]?/iu;
+
+      const processedLines = [];
+      for (const line of text.split('\n')) {
+        if (ansLineStart.test(line.trim())) {
+          processedLines.push(line);
+        } else {
+          processedLines.push(line.replace(inlineOptRegex, '$1\n'));
         }
-      });
-      if (currentBlock.some((line) => line.trim())) answerSeparatedBlocks.push(currentBlock.join('\n'));
-      // Support ChatGPT's named English/Urdu question headings without blank lines.
-      const namedQuestionBlocks = text.split(/\r?\n(?=\s*(?:\*\*)?\s*(?:question|q|\u0633\u0648\u0627\u0644)\s*\d+\s*[:.)])/iu).filter(Boolean);
-      const blocks = blankLineBlocks.length > 1
-        ? blankLineBlocks
-        : answerSeparatedBlocks.length > 1 ? answerSeparatedBlocks
-        : namedQuestionBlocks.length > 1 ? namedQuestionBlocks : text.split(/\r?\n(?=\s*question\s*\d+\s*[:.)])/i).filter(Boolean);
+      }
+      text = processedLines.join('\n');
+
+      // Split into question blocks:
+      let blocks = text.split(/\n\s*\n+/).map((b) => b.trim()).filter(Boolean);
+
+      if (blocks.length <= 1) {
+        const qSplitRegex = new RegExp(`\\n(?=\\s*(?:(?:\\u0633\\u0648\\u0627\\u0644|\\bquestion\\b|\\bq\\b)\\s*${num}?\\s*[:.)-]?|${num}\\s*[.)-]\\s+))`, 'iu');
+        const splitByQ = text.split(qSplitRegex).map((b) => b.trim()).filter(Boolean);
+        if (splitByQ.length > 1) {
+          blocks = splitByQ;
+        } else {
+          const ansBlocks = [];
+          let cur = [];
+          for (const line of text.split('\n')) {
+            cur.push(line);
+            if (ansLineStart.test(line.trim())) {
+              ansBlocks.push(cur.join('\n'));
+              cur = [];
+            }
+          }
+          if (cur.some((l) => l.trim())) ansBlocks.push(cur.join('\n'));
+          if (ansBlocks.length > 1) blocks = ansBlocks;
+        }
+      }
+
+      const optLineRegex = /^(?:[（(\[]\s*([A-Da-d]|\u0627\u0644\u0641|\u0627|\u0628|\u062c|\u062f)\s*[）)\]]|(\b[A-Da-d]|\u0627\u0644\u0641|\u0627|\u0628|\u062c|\u062f)\s*[:.)\]\u06d4\u060c–—\-])\s*(.+)$/iu;
+      const ansLineRegex = /^(?:درست\s+جواب|صحیح\s+جواب|جواب|correct\s+answer|correct\s+option|answer)\s*[:：(]?\s*([^\n)]+)[）)]?\s*$/iu;
+
       imported = blocks.map((block) => {
-        const lines = block.split(/\r?\n/)
-          .map(cleanPasteLine)
+        const lines = block
+          .split('\n')
+          .map((l) => l.trim().replace(/^[-*•]\s*/, '').trim())
           .filter(Boolean);
-        const answerPattern = answerLinePattern;
-        const answerLine = lines.find((line) => answerPattern.test(line));
-        // Accept common English and Urdu option markers, including Urdu full stop
-        // (۔), Arabic comma (،), parentheses, and hyphen styles.
-        const optionPattern = /^\s*(?:(?:option|choice|\u0622\u067e\u0634\u0646)\s*)?\(?\s*(\u0627\u0644\u0641|\u0627|\u0628|\u062c|\u062f|A|B|C|D|a|b|c|d|1|2|3|4)\s*\)?\s*(?:[.)\u060c\u06d4:：]|[-–—])\s*(.+?)\s*$/iu;
-        const optionEntries = lines.map((line, lineIndex) => {
-          const match = line.match(optionPattern);
-          return match ? { line, lineIndex, label: match[1], text: match[2].trim() } : null;
-        }).filter(Boolean);
-        const options = optionEntries.map((entry) => ({ text: entry.text, isCorrect: false }));
-        const answerMatch = answerLine?.match(answerPattern);
-        const answer = answerMatch?.[1]?.trim() || '';
-        const cleanAnswer = answer.replace(/[.)\u060c\u06d4:：-]/g, '').trim().toLocaleLowerCase();
-        const answerIndex = optionEntries.findIndex((entry) => entry.label.toLocaleLowerCase() === cleanAnswer);
-        const matchedAnswerIndex = answerIndex >= 0
-          ? answerIndex
-          : options.findIndex((option) => option.text.toLocaleLowerCase() === answer.toLocaleLowerCase());
-        if (matchedAnswerIndex >= 0) options[matchedAnswerIndex].isCorrect = true;
-        // A question title must only use text before the first answer option.
-        // This prevents an Urdu option from being appended to the question when
-        // the pasted document uses a different label punctuation style.
-        const firstOptionLine = optionEntries[0]?.lineIndex ?? lines.length;
-        const title = lines.slice(0, firstOptionLine)
-          .filter((line) => line !== answerLine && !/^(?:options?|choices|\u0622\u067e\u0634\u0646\u0632?|\u0627\u062e\u062a\u06cc\u0627\u0631\u0627\u062a)\s*[:：]?$/iu.test(line))
-          .join(' ')
-          .replace(/^(?:question|q|\u0633\u0648\u0627\u0644)\s*\d+\s*[:.)-]?\s*/iu, '')
-          .replace(/^\d+[.)]\s*/, '');
-        return normaliseImportedQuestion({ title, options });
+
+        if (lines.length === 0) return null;
+
+        const titleLines = [];
+        const rawOptions = [];
+        let answerText = '';
+        let foundFirstOption = false;
+
+        for (const line of lines) {
+          const ansMatch = line.match(ansLineRegex);
+          if (ansMatch) {
+            answerText = ansMatch[1].trim();
+            continue;
+          }
+
+          const optMatch = line.match(optLineRegex);
+          if (optMatch) {
+            foundFirstOption = true;
+            const label = (optMatch[1] || optMatch[2]).trim();
+            let optText = optMatch[3].trim();
+            let isCorrect = false;
+
+            if (/\*|✓|\(درست\)|\(صحیح\)|\(correct\)/iu.test(optText)) {
+              isCorrect = true;
+              optText = optText.replace(/\*|✓|\(درست\)|\(صحیح\)|\(correct\)/giu, '').trim();
+            }
+
+            rawOptions.push({ label, text: optText, isCorrect });
+            continue;
+          }
+
+          if (!foundFirstOption) {
+            if (/^(?:options?|choices|\u0622\u067e\u0634\u0646\u0632?|\u0627\u062e\u062a\u06cc\u0627\u0631\u0627\u062a)\s*[:：]?$/iu.test(line)) {
+              continue;
+            }
+            titleLines.push(line);
+          }
+        }
+
+        let title = titleLines.join(' ').trim();
+        title = title
+          .replace(/^(?:سوال|question|q)\s*(?:\d+|[\u06F0-\u06F9]+|[\u0660-\u0669]+)?\s*[:.)-]?\s*/iu, '')
+          .replace(/^(?:\d+|[\u06F0-\u06F9]+|[\u0660-\u0669]+)\s*[.)-]\s*/, '')
+          .trim();
+
+        if (rawOptions.length < 2) return null;
+
+        const alreadyMarked = rawOptions.some((o) => o.isCorrect);
+        if (!alreadyMarked && answerText) {
+          const clean = answerText.replace(/[.)\u060c\u06d4:：\-()[\]]/g, '').trim().toLowerCase();
+          const map = {
+            'الف': 0, 'ا': 0, 'a': 0,
+            'ب': 1, 'b': 1,
+            'ج': 2, 'c': 2,
+            'د': 3, 'd': 3,
+          };
+          let idx = -1;
+          if (map[clean] !== undefined && map[clean] < rawOptions.length) {
+            idx = map[clean];
+          } else {
+            idx = rawOptions.findIndex((o) => o.label.toLowerCase() === clean);
+            if (idx === -1) {
+              idx = rawOptions.findIndex((o) => o.text.toLowerCase() === clean || o.text.toLowerCase().includes(clean));
+            }
+          }
+          if (idx >= 0) rawOptions[idx].isCorrect = true;
+        }
+
+        if (!rawOptions.some((o) => o.isCorrect) && rawOptions.length > 0) {
+          rawOptions[0].isCorrect = true;
+        }
+
+        return {
+          title: title || 'New question prompt...',
+          type: 'mcq_single',
+          difficulty: 'medium',
+          topicTag: 'General',
+          points: 10,
+          timeLimitSeconds: 30,
+          explanation: '',
+          options: rawOptions.map((o) => ({ text: o.text, isCorrect: o.isCorrect })),
+        };
       }).filter(Boolean);
     }
     if (!imported.length) {
@@ -584,6 +668,7 @@ Correct Answer: B`}</pre></div>
                 <p>Use a blank line between questions. The importer also accepts <code>Answer: B</code>, <code>جواب: الف</code>, markdown bold text, and JSON from ChatGPT.</p>
               </details>
               <textarea
+                dir="auto"
                 rows={9}
                 value={pastedQuestions}
                 onChange={(event) => setPastedQuestions(event.target.value)}
@@ -654,6 +739,7 @@ Correct Answer: B`}</pre></div>
                   value={q.title}
                   onChange={(e) => updateQuestion(qIdx, 'title', e.target.value)}
                   placeholder="Enter the question text here..."
+                  dir="auto"
                   required
                 />
 
@@ -702,6 +788,7 @@ Correct Answer: B`}</pre></div>
                           value={opt.text}
                           onChange={(e) => updateOptionText(qIdx, optIdx, e.target.value)}
                           placeholder={`Option ${optIdx + 1}`}
+                          dir="auto"
                           style={{
                             flex: 1,
                             background: 'transparent',
