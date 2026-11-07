@@ -58,37 +58,38 @@ class SoundManager {
     return Promise.resolve();
   }
 
-  // Cheerful correct answer chime (3 fast rising tones)
+  // Cheerful, rewarding correct answer chime (4-note ascending major sparkle)
   playCorrect() {
     if (this.isMuted) return;
     try {
       const ctx = this.getAudioContext();
       if (!ctx) return;
       const now = ctx.currentTime;
-      const notes = [523.25, 659.25, 783.99]; // C5, E5, G5
+      // C5, E5, G5, C6 (Bright triumphant arpeggio)
+      const notes = [523.25, 659.25, 783.99, 1046.50];
 
       notes.forEach((freq, idx) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
-        const start = now + idx * 0.07;
+        const start = now + idx * 0.055;
 
         osc.type = 'triangle';
         osc.frequency.setValueAtTime(freq, start);
 
         gain.gain.setValueAtTime(0.001, start);
-        gain.gain.linearRampToValueAtTime(0.18, start + 0.015);
-        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.22);
+        gain.gain.linearRampToValueAtTime(0.22, start + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.28);
 
         osc.connect(gain);
-        gain.connect(ctx.destination);
+        gain.connect(this.masterGain || ctx.destination);
 
         osc.start(start);
-        osc.stop(start + 0.23);
+        osc.stop(start + 0.29);
       });
     } catch {}
   }
 
-  // Soft incorrect thud
+  // Soft, friendly arcade "uh-oh" chime (playful downward slide)
   playIncorrect() {
     if (this.isMuted) return;
     try {
@@ -96,25 +97,35 @@ class SoundManager {
       if (!ctx) return;
       const now = ctx.currentTime;
 
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
+      // Two quick downward playful notes
+      const notes = [
+        { freq: 280, dur: 0.12, time: 0 },
+        { freq: 210, dur: 0.22, time: 0.09 },
+      ];
 
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(220, now);
-      osc.frequency.exponentialRampToValueAtTime(110, now + 0.2);
+      notes.forEach((n) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const t = now + n.time;
 
-      gain.gain.setValueAtTime(0.16, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(n.freq, t);
+        osc.frequency.exponentialRampToValueAtTime(n.freq * 0.75, t + n.dur);
 
-      osc.connect(gain);
-      gain.connect(ctx.destination);
+        gain.gain.setValueAtTime(0.001, t);
+        gain.gain.linearRampToValueAtTime(0.18, t + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + n.dur);
 
-      osc.start(now);
-      osc.stop(now + 0.23);
+        osc.connect(gain);
+        gain.connect(this.masterGain || ctx.destination);
+
+        osc.start(t);
+        osc.stop(t + n.dur + 0.01);
+      });
     } catch {}
   }
 
-  // Timer Tick (crisp click)
+  // Crisp, dynamic countdown tick
   playTick() {
     if (this.isMuted) return;
     try {
@@ -126,16 +137,17 @@ class SoundManager {
       const gain = ctx.createGain();
 
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, now);
+      osc.frequency.setValueAtTime(987.77, now); // B5 woodblock pitch
+      osc.frequency.exponentialRampToValueAtTime(440, now + 0.035);
 
-      gain.gain.setValueAtTime(0.035, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+      gain.gain.setValueAtTime(0.06, now);
+      gain.gain.exponentialRampToValueAtTime(0.0005, now + 0.038);
 
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(this.masterGain || ctx.destination);
 
       osc.start(now);
-      osc.stop(now + 0.045);
+      osc.stop(now + 0.04);
     } catch {}
   }
 
@@ -223,9 +235,10 @@ class SoundManager {
   }
 
   /**
-   * Ultra-Lightweight, Catchy Enjoyment Game Groove 🎶
-   * 8th-note pulse (240ms interval = ~125 BPM).
-   * Allocates at most 1 oscillator per tick (zero CPU load, buttery smooth 60fps).
+   * Catchy, Enjoyable Game-Show Soundtrack & Arcade Groove 🎶
+   * 128 BPM (~234ms 8th-note pulse).
+   * 4-Bar Chord Progression (C - G - Am - F) with bouncy bass, sparkling synth arpeggio,
+   * and subtle rhythmic hi-hat percussion for an energetic, interactive live quiz feel!
    */
   startQuizBGM() {
     if (this.bgmPlaying || this.isMuted) return;
@@ -236,59 +249,98 @@ class SoundManager {
     this.stepIndex = 0;
     this.notify();
 
-    // Catchy upbeat C major / Am scale notes
-    const melodyScale = [523.25, 659.25, 783.99, 880.00, 659.25, 783.99, 1046.5, 783.99];
-    const bassScale = [130.81, 164.81, 174.61, 196.00];
+    // 4-Bar Chord Progression Bass Frequencies (C -> G -> Am -> F)
+    const chordBassRoots = [
+      { low: 65.41, oct: 130.81 },  // C2, C3
+      { low: 49.00, oct: 98.00 },   // G1, G2
+      { low: 55.00, oct: 110.00 },  // A1, A2
+      { low: 43.65, oct: 87.31 },   // F1, F2
+    ];
+
+    // Catchy Game Melody Pattern across the 4 chords
+    const melodyPatterns = [
+      [523.25, 659.25, 783.99, 1046.50], // C major arpeggio
+      [392.00, 587.33, 783.99, 987.77],  // G major arpeggio
+      [440.00, 523.25, 659.25, 880.00],  // A minor arpeggio
+      [349.23, 523.25, 659.25, 880.00],  // F major / add9
+    ];
 
     const playBgmStep = () => {
       if (!this.bgmPlaying || this.isMuted) return;
 
       try {
         const now = ctx.currentTime;
-        const step = this.stepIndex;
+        const step = this.stepIndex; // 0 to 15 (16 eighth notes in 4 bars of 4/4)
+        const chordIdx = Math.floor(step / 4) % 4;
+        const subStep = step % 4;
 
-        // Alternate: on even steps play rhythmic bass note, on odd steps play melodic pluck
-        if (step % 2 === 0) {
-          const bassOsc = ctx.createOscillator();
-          const bassGain = ctx.createGain();
+        // 1. Bouncy Synth Bass (Disco-funk octave bounce)
+        const bassPair = chordBassRoots[chordIdx];
+        const bassFreq = subStep % 2 === 0 ? bassPair.low : bassPair.oct;
 
-          bassOsc.type = 'triangle';
-          const bFreq = bassScale[(step / 2) % bassScale.length];
-          bassOsc.frequency.setValueAtTime(bFreq, now);
+        const bassOsc = ctx.createOscillator();
+        const bassGain = ctx.createGain();
+        bassOsc.type = 'triangle';
+        bassOsc.frequency.setValueAtTime(bassFreq, now);
 
-          bassGain.gain.setValueAtTime(0.001, now);
-          bassGain.gain.linearRampToValueAtTime(0.06 * this.bgmVolume, now + 0.02);
-          bassGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+        bassGain.gain.setValueAtTime(0.001, now);
+        bassGain.gain.linearRampToValueAtTime(0.09 * this.bgmVolume, now + 0.015);
+        bassGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.21);
 
-          bassOsc.connect(bassGain);
-          bassGain.connect(this.masterGain || ctx.destination);
+        bassOsc.connect(bassGain);
+        bassGain.connect(this.masterGain || ctx.destination);
+        bassOsc.start(now);
+        bassOsc.stop(now + 0.22);
 
-          bassOsc.start(now);
-          bassOsc.stop(now + 0.21);
-        } else {
-          const mOsc = ctx.createOscillator();
-          const mGain = ctx.createGain();
+        // 2. Sparkling Upbeat Synth Melody
+        const chordNotes = melodyPatterns[chordIdx];
+        const melFreq = chordNotes[subStep % chordNotes.length];
 
-          mOsc.type = 'sine';
-          const mFreq = melodyScale[step % melodyScale.length];
-          mOsc.frequency.setValueAtTime(mFreq, now);
+        const mOsc = ctx.createOscillator();
+        const mGain = ctx.createGain();
+        mOsc.type = 'sine';
+        mOsc.frequency.setValueAtTime(melFreq, now);
 
-          mGain.gain.setValueAtTime(0.001, now);
-          mGain.gain.linearRampToValueAtTime(0.045 * this.bgmVolume, now + 0.015);
-          mGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+        mGain.gain.setValueAtTime(0.001, now);
+        mGain.gain.linearRampToValueAtTime(0.055 * this.bgmVolume, now + 0.012);
+        mGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.19);
 
-          mOsc.connect(mGain);
-          mGain.connect(this.masterGain || ctx.destination);
+        mOsc.connect(mGain);
+        mGain.connect(this.masterGain || ctx.destination);
+        mOsc.start(now);
+        mOsc.stop(now + 0.2);
 
-          mOsc.start(now);
-          mOsc.stop(now + 0.19);
+        // 3. Subtle Hi-Hat / Shaker Tick on 16th beats to give dance groove
+        if (step % 2 === 1) {
+          const bufferSize = Math.floor(ctx.sampleRate * 0.025);
+          const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+          const data = noiseBuffer.getChannelData(0);
+          for (let i = 0; i < bufferSize; i++) {
+            data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.008));
+          }
+          const noise = ctx.createBufferSource();
+          noise.buffer = noiseBuffer;
+
+          const filter = ctx.createBiquadFilter();
+          filter.type = 'highpass';
+          filter.frequency.setValueAtTime(6500, now);
+
+          const hGain = ctx.createGain();
+          hGain.gain.setValueAtTime(0.025 * this.bgmVolume, now);
+          hGain.gain.exponentialRampToValueAtTime(0.0005, now + 0.024);
+
+          noise.connect(filter);
+          filter.connect(hGain);
+          hGain.connect(this.masterGain || ctx.destination);
+          noise.start(now);
+          noise.stop(now + 0.026);
         }
 
         this.stepIndex = (this.stepIndex + 1) % 16;
       } catch {}
 
-      // Steady 240ms 8th-note tempo
-      this.bgmTimer = setTimeout(playBgmStep, 240);
+      // Energetic 128 BPM groove = 234ms per 8th note
+      this.bgmTimer = setTimeout(playBgmStep, 234);
     };
 
     playBgmStep();

@@ -53,6 +53,10 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    loginCount: {
+      type: Number,
+      default: 0,
+    },
     emailVerificationCode: { type: String, select: false },
     emailVerificationExpires: { type: Date, select: false },
     passwordResetCode: { type: String, select: false },

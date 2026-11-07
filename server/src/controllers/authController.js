@@ -197,8 +197,21 @@ const login = async (req, res, next) => {
     const refreshToken = signRefreshToken(user, sessionId);
 
     res.cookie('refreshToken', refreshToken, cookieOptions);
-    sendLoginAlert({ email: user.email, name: user.name }).catch((error) => console.error('Login email failed:', error.message));
-    await writeAuditLog({ user, action: 'USER_SIGNED_IN', resource: 'Account sign-in', details: { method: 'password' }, req });
+
+    // Track login count
+    user.loginCount = (user.loginCount || 0) + 1;
+    if (user.save) {
+      await user.save().catch(() => {});
+    }
+
+    // Only dispatch periodic security alert email after several logins (every 5th login),
+    // so users do not receive emails on every single routine login and logout
+    if (user.loginCount % 5 === 0) {
+      sendLoginAlert({ email: user.email, name: user.name }).catch((error) =>
+        console.error('Login email failed:', error.message)
+      );
+    }
+    await writeAuditLog({ user, action: 'USER_SIGNED_IN', resource: 'Account sign-in', details: { method: 'password', loginCount: user.loginCount }, req });
 
     res.status(200).json({
       success: true,
