@@ -1010,6 +1010,26 @@ Correct Answer: B`}</pre></div>
                 />
                 Enforce Fullscreen During Exam
               </label>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', cursor: 'pointer', fontSize: '0.9rem', color: 'var(--text)' }}>
+                <input
+                  type="checkbox"
+                  checked={settings.shuffleQuestions}
+                  onChange={(e) => setSettings({ ...settings, shuffleQuestions: e.target.checked })}
+                  style={{ accentColor: 'var(--primary)', width: '18px', height: '18px' }}
+                />
+                Shuffle Question Order
+              </label>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', cursor: 'pointer', fontSize: '0.9rem', color: 'var(--text)' }}>
+                <input
+                  type="checkbox"
+                  checked={settings.shuffleOptions}
+                  onChange={(e) => setSettings({ ...settings, shuffleOptions: e.target.checked })}
+                  style={{ accentColor: 'var(--primary)', width: '18px', height: '18px' }}
+                />
+                Shuffle Options for Each Participant
+              </label>
             </div>
           </div>
 

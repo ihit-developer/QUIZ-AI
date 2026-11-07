@@ -143,6 +143,27 @@ const startAttempt = async (req, res, next) => {
       }));
     }
 
+    const shuffleArray = (arr) => {
+      const copy = [...arr];
+      for (let i = copy.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      return copy;
+    };
+
+    let processedQuestions = rawQuestions.map((q) => {
+      const qObj = q.toObject ? q.toObject() : { ...q };
+      if (quiz.settings?.shuffleOptions) {
+        qObj.options = shuffleArray(qObj.options || []);
+      }
+      return qObj;
+    });
+
+    if (quiz.settings?.shuffleQuestions) {
+      processedQuestions = shuffleArray(processedQuestions);
+    }
+
     res.status(201).json({
       success: true,
       data: {
@@ -152,7 +173,7 @@ const startAttempt = async (req, res, next) => {
           title: quiz.title,
           settings: quiz.settings,
         },
-        questions: rawQuestions,
+        questions: processedQuestions,
       },
     });
   } catch (error) {

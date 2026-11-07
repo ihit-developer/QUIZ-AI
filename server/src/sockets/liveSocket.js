@@ -249,21 +249,46 @@ class LiveSessionManager {
         });
 
         if (room.status === 'active' && room.questions && room.questions.length > 0) {
-          const sanitizedQuestions = (room.questions || []).map((q, idx) => ({
-            id: q._id || q.id,
-            title: q.title,
-            options: (q.options || []).map((o) => (typeof o === 'string' ? o : o.text)),
-            correctIndex: (q.options || []).findIndex((o) => o.isCorrect === true || o.isCorrect === 'true' || Boolean(o.isCorrect)),
-            points: q.points || 10,
-            timeLimitSeconds: getQuestionTimeLimit(room, idx),
-          }));
+          const shouldShuffle = room.settings?.shuffleOptions !== false;
           socket.emit('quiz:started', {
             questionIdx: room.currentQuestionIdx || 0,
-            questions: sanitizedQuestions,
+            questions: buildSanitizedQuestions(room, room.questions, shouldShuffle),
             title: room.quizTitle,
           });
         }
       });
+
+      // Fisher-Yates shuffle helper
+      const shuffleArray = (arr) => {
+        const copy = [...arr];
+        for (let i = copy.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [copy[i], copy[j]] = [copy[j], copy[i]];
+        }
+        return copy;
+      };
+
+      // Helper to sanitize questions and optionally shuffle options per participant
+      const buildSanitizedQuestions = (room, questions, shouldShuffleOptions = false) => {
+        return (questions || []).map((q, idx) => {
+          const rawOptions = (q.options || []).map((o) => ({
+            text: typeof o === 'string' ? o : o.text,
+            isCorrect: Boolean(o.isCorrect === true || o.isCorrect === 'true' || o.isCorrect),
+          }));
+
+          const finalOptions = shouldShuffleOptions ? shuffleArray(rawOptions) : rawOptions;
+          const correctIndex = finalOptions.findIndex((o) => o.isCorrect);
+
+          return {
+            id: q._id || q.id,
+            title: q.title,
+            options: finalOptions.map((o) => o.text),
+            correctIndex: correctIndex >= 0 ? correctIndex : 0,
+            points: q.points || 10,
+            timeLimitSeconds: getQuestionTimeLimit(room, idx),
+          };
+        });
+      };
 
       // Helper to compute question time limit safely
       const getQuestionTimeLimit = (room, qIdx) => {
@@ -386,24 +411,39 @@ class LiveSessionManager {
           }
 
           clearRoomTimers(room);
+
+          // If shuffleQuestions is enabled, randomize question sequence for this game session
+          if (room.settings?.shuffleQuestions) {
+            room.questions = shuffleArray(room.questions);
+          }
+
           room.status = 'active';
           room.startedAt = new Date();
           room.currentQuestionIdx = 0;
           await liveRoomStore.set(code, room);
-          const sanitizedQuestions = (room.questions || []).map((q, idx) => ({
-            id: q._id || q.id,
-            title: q.title,
-            options: (q.options || []).map((o) => (typeof o === 'string' ? o : o.text)),
-            correctIndex: (q.options || []).findIndex((o) => o.isCorrect === true || o.isCorrect === 'true' || Boolean(o.isCorrect)),
-            points: q.points || 10,
-            timeLimitSeconds: getQuestionTimeLimit(room, idx),
-          }));
 
-          io.to(code).emit('quiz:started', {
+          const shouldShuffleOptions = room.settings?.shuffleOptions !== false;
+
+          // 1. Host receives standard question order for public projection/review
+          socket.emit('quiz:started', {
             questionIdx: 0,
-            questions: sanitizedQuestions,
+            questions: buildSanitizedQuestions(room, room.questions, false),
             title: room.quizTitle,
           });
+
+          // 2. Each participant receives their own personalized option shuffle to prevent screen peeking
+          for (const [pSocketId] of room.participants.entries()) {
+            if (pSocketId !== socket.id) {
+              const pSocket = io.sockets.sockets.get(pSocketId);
+              if (pSocket) {
+                pSocket.emit('quiz:started', {
+                  questionIdx: 0,
+                  questions: buildSanitizedQuestions(room, room.questions, shouldShuffleOptions),
+                  title: room.quizTitle,
+                });
+              }
+            }
+          }
 
           startQuestionTimer(code);
         }
@@ -423,16 +463,26 @@ class LiveSessionManager {
           }
 
           participant.lastAnsweredQIdx = room.currentQuestionIdx;
-          const pts = isCorrect ? (Number(pointsAwarded) || 10) : 0;
+
+          // Ultimate Server Authority: verify option text directly against room question
+          const currentQ = room.questions[room.currentQuestionIdx];
+          const matchedOpt = (currentQ?.options || []).find((o) => {
+            const text = typeof o === 'string' ? o : o.text;
+            return text?.trim().toLowerCase() === String(selectedOptionText || '').trim().toLowerCase();
+          });
+          const actualCorrect = matchedOpt
+            ? Boolean(matchedOpt.isCorrect === true || matchedOpt.isCorrect === 'true' || matchedOpt.isCorrect)
+            : Boolean(isCorrect);
+
+          const pts = actualCorrect ? (Number(pointsAwarded) || currentQ?.points || 10) : 0;
           participant.score += pts;
 
-          const currentQ = room.questions[room.currentQuestionIdx];
           participant.answers.push({
             // A room restored from Redis has `id`; an in-memory Mongoose
             // question has `_id`. Supporting both prevents rejected attempts.
             questionId: currentQ?._id || currentQ?.id || null,
             selectedText: selectedOptionText || '',
-            isCorrect: Boolean(isCorrect),
+            isCorrect: Boolean(actualCorrect),
             pointsAwarded: pts,
             timeSpentSeconds: 5,
           });
@@ -462,7 +512,7 @@ class LiveSessionManager {
           // Send feedback directly back to participant with their updated total score
           socket.emit('participant:answer-confirmed', {
             questionIdx: room.currentQuestionIdx,
-            isCorrect: Boolean(isCorrect),
+            isCorrect: Boolean(actualCorrect),
             currentScore: participant.score,
           });
 
