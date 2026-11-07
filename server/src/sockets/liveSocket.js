@@ -532,7 +532,7 @@ class LiveSessionManager {
           // Count submissions among active connected participants in room
           const roomSockets = io.sockets.adapter.rooms.get(code) || new Set();
           const activeParticipants = Array.from(room.participants.entries())
-            .filter(([sockId]) => roomSockets.has(sockId) && sockId !== room.hostSocketId);
+            .filter(([sockId]) => roomSockets.has(sockId));
           const totalActive = activeParticipants.length;
           const submittedCount = activeParticipants.filter(
             ([, p]) => p.lastAnsweredQIdx === room.currentQuestionIdx
@@ -622,7 +622,7 @@ class LiveSessionManager {
               // Re-check remaining active connected participants
               const roomSockets = io.sockets.adapter.rooms.get(code) || new Set();
               const activeParticipants = Array.from(room.participants.entries())
-                .filter(([sockId]) => roomSockets.has(sockId) && sockId !== room.hostSocketId);
+                .filter(([sockId]) => roomSockets.has(sockId));
               const totalActive = activeParticipants.length;
               const submittedCount = activeParticipants.filter(
                 ([, p]) => p.lastAnsweredQIdx === room.currentQuestionIdx
