@@ -51,6 +51,7 @@ export const LiveRoom = () => {
   const currentQIdxRef = useRef(0);
   const hasAnsweredRef = useRef(false);
   const hasCompletedRef = useRef(false);
+  const advanceTimerRef = useRef(null);
   // null | 'correct' | 'wrong'
   const [answerResult, setAnswerResult] = useState(null);
   const [myScore, setMyScore] = useState(0);
@@ -160,18 +161,15 @@ export const LiveRoom = () => {
     };
 
     const onTimerTick = (data) => {
-      // Discard ticks from an outdated question transition
-      if (data && data.questionIdx !== undefined && data.questionIdx !== currentQIdxRef.current) return;
-      setQuestionTimer({ secondsLeft: data.secondsLeft, totalSeconds: data.totalSeconds || 30 });
-      if (data.secondsLeft <= 3 && data.secondsLeft > 0) soundManager.playTick();
+      // In host view, show the room clock
+      if (isHost && data) {
+        setQuestionTimer({ secondsLeft: data.secondsLeft, totalSeconds: data.totalSeconds || 30 });
+      }
     };
 
     const onTimeUp = (data) => {
-      if (data && data.questionIdx !== undefined && data.questionIdx !== currentQIdxRef.current) return;
-      setQuestionTimer((prev) => ({ ...prev, secondsLeft: 0 }));
-      if (!hasAnsweredRef.current) {
-        soundManager.playIncorrect();
-        toast('⏰ Time is up for this question!', { id: 'time-up-toast', icon: '⌛' });
+      if (isHost) {
+        setQuestionTimer((prev) => ({ ...prev, secondsLeft: 0 }));
       }
     };
 
@@ -180,19 +178,13 @@ export const LiveRoom = () => {
     };
 
     const onQuestionAdvanced = (data) => {
-      const qIdx = data.questionIdx || 0;
-      currentQIdxRef.current = qIdx;
-      hasAnsweredRef.current = false;
-      setCurrentQIdx(qIdx);
-      setSelectedOption(null);
-      setSelectedOptionIdx(null);
-      setHasAnsweredCurrent(false);
-      setAnswerResult(null);
-      setSubmissionStats({ submittedCount: 0, totalParticipants: 0 });
-
-      const nextLimit = Number(data.totalSeconds) || 30;
-      setQuestionTimer({ secondsLeft: nextLimit, totalSeconds: nextLimit });
-      launchSprinkles(10);
+      // Host view follows room advancement
+      if (isHost) {
+        const qIdx = data.questionIdx || 0;
+        setCurrentQIdx(qIdx);
+        const nextLimit = Number(data.totalSeconds) || 30;
+        setQuestionTimer({ secondsLeft: nextLimit, totalSeconds: nextLimit });
+      }
     };
 
     const onLeaderboardUpdated = (data) => {
@@ -283,31 +275,37 @@ export const LiveRoom = () => {
   };
 
   const moveToNextQuestion = useCallback(() => {
-    setCurrentQIdx((prevIdx) => {
-      const qList = questionsRef.current.length > 0 ? questionsRef.current : questions;
-      const nextIdx = prevIdx + 1;
-      if (nextIdx < qList.length) {
-        currentQIdxRef.current = nextIdx;
-        hasAnsweredRef.current = false;
-        setSelectedOption(null);
-        setSelectedOptionIdx(null);
-        setHasAnsweredCurrent(false);
-        setAnswerResult(null);
+    if (advanceTimerRef.current) {
+      clearTimeout(advanceTimerRef.current);
+      advanceTimerRef.current = null;
+    }
 
-        const nextLimit = Number(qList[nextIdx]?.timeLimitSeconds) || 30;
-        setQuestionTimer({ secondsLeft: nextLimit, totalSeconds: nextLimit });
-        return nextIdx;
-      } else {
-        setHasCompletedAllQuestions(true);
-        hasCompletedRef.current = true;
-        const socket = getSocket();
-        socket.emit('participant:finished-all', {
-          roomCode: code.toUpperCase(),
-          userId: user?.id || user?._id || null,
-        });
-        return prevIdx;
-      }
-    });
+    const qList = questionsRef.current.length > 0 ? questionsRef.current : questions;
+    const currentIdx = currentQIdxRef.current;
+    const nextIdx = currentIdx + 1;
+
+    if (nextIdx < qList.length) {
+      currentQIdxRef.current = nextIdx;
+      hasAnsweredRef.current = false;
+
+      // Clean, unnested top-level state updates
+      setCurrentQIdx(nextIdx);
+      setSelectedOption(null);
+      setSelectedOptionIdx(null);
+      setHasAnsweredCurrent(false);
+      setAnswerResult(null);
+
+      const nextLimit = Number(qList[nextIdx]?.timeLimitSeconds) || 30;
+      setQuestionTimer({ secondsLeft: nextLimit, totalSeconds: nextLimit });
+    } else {
+      hasCompletedRef.current = true;
+      setHasCompletedAllQuestions(true);
+      const socket = getSocket();
+      socket.emit('participant:finished-all', {
+        roomCode: code.toUpperCase(),
+        userId: user?.id || user?._id || null,
+      });
+    }
   }, [questions, code, user]);
 
   const handleTimeUp = useCallback(() => {
@@ -318,7 +316,8 @@ export const LiveRoom = () => {
     soundManager.playIncorrect();
     toast('⏰ Time is up for this question!', { id: 'time-up-toast', icon: '⌛' });
 
-    const currentQuestion = questions[currentQIdxRef.current];
+    const qList = questionsRef.current.length > 0 ? questionsRef.current : questions;
+    const currentQuestion = qList[currentQIdxRef.current];
     const socket = getSocket();
     socket.emit('participant:submit-answer', {
       roomCode: code.toUpperCase(),
@@ -330,16 +329,19 @@ export const LiveRoom = () => {
       userId: user?.id || user?._id || null,
     });
 
-    setTimeout(() => {
+    if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+    advanceTimerRef.current = setTimeout(() => {
       moveToNextQuestion();
     }, 600);
   }, [questions, code, user, moveToNextQuestion]);
 
   // Pass both the option text and its index so we can compute correctness
   const handleAnswerSubmit = useCallback((optionText, optionIndex) => {
-    if (hasAnsweredCurrent || questionTimer.secondsLeft <= 0 || hasCompletedAllQuestions) return;
+    if (hasAnsweredRef.current || hasCompletedRef.current || questionTimer.secondsLeft <= 0) return;
 
-    const currentQuestion = questions[currentQIdx];
+    hasAnsweredRef.current = true;
+    const qList = questionsRef.current.length > 0 ? questionsRef.current : questions;
+    const currentQuestion = qList[currentQIdxRef.current] || qList[currentQIdx];
     if (!currentQuestion) return;
 
     // Compute correctness client-side using correctIndex from server payload
@@ -349,7 +351,6 @@ export const LiveRoom = () => {
     setSelectedOption(optionText);
     setSelectedOptionIdx(optionIndex);
     setHasAnsweredCurrent(true);
-    hasAnsweredRef.current = true;
     setAnswerResult(isCorrect ? 'correct' : 'wrong');
 
     if (isCorrect) {
@@ -362,7 +363,7 @@ export const LiveRoom = () => {
     const socket = getSocket();
     socket.emit('participant:submit-answer', {
       roomCode: code.toUpperCase(),
-      questionIdx: currentQIdx,
+      questionIdx: currentQIdxRef.current,
       questionId: currentQuestion.id || currentQuestion._id || null,
       selectedOptionText: optionText,
       isCorrect,
@@ -370,23 +371,21 @@ export const LiveRoom = () => {
       userId: user?.id || user?._id || null,
     });
 
-    // Directly advance to next question after a crisp 450ms visual feedback
-    setTimeout(() => {
+    if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+    advanceTimerRef.current = setTimeout(() => {
       moveToNextQuestion();
     }, 450);
-  }, [hasAnsweredCurrent, questionTimer.secondsLeft, hasCompletedAllQuestions, questions, currentQIdx, code, user, launchSprinkles, moveToNextQuestion]);
+  }, [questionTimer.secondsLeft, questions, currentQIdx, code, user, launchSprinkles, moveToNextQuestion]);
 
-  // Local per-question timer countdown for the active participant
+  // 1. Local per-question timer countdown for the active participant
   useEffect(() => {
     if (roomState !== 'in_progress' || isHost || hasCompletedAllQuestions || hasAnsweredCurrent) {
-      return;
+      return undefined;
     }
 
     const timer = setInterval(() => {
       setQuestionTimer((prev) => {
         if (prev.secondsLeft <= 1) {
-          clearInterval(timer);
-          handleTimeUp();
           return { ...prev, secondsLeft: 0 };
         }
         const nextSeconds = prev.secondsLeft - 1;
@@ -398,7 +397,29 @@ export const LiveRoom = () => {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [roomState, isHost, currentQIdx, hasCompletedAllQuestions, hasAnsweredCurrent, handleTimeUp]);
+  }, [roomState, isHost, currentQIdx, hasCompletedAllQuestions, hasAnsweredCurrent]);
+
+  // 2. Safely trigger handleTimeUp when secondsLeft reaches 0 outside of state updaters
+  useEffect(() => {
+    if (
+      roomState === 'in_progress' &&
+      !isHost &&
+      !hasCompletedAllQuestions &&
+      !hasAnsweredCurrent &&
+      questionTimer.secondsLeft <= 0
+    ) {
+      handleTimeUp();
+    }
+  }, [questionTimer.secondsLeft, roomState, isHost, hasCompletedAllQuestions, hasAnsweredCurrent, handleTimeUp]);
+
+  // 3. Clean up advance timer on unmount
+  useEffect(() => {
+    return () => {
+      if (advanceTimerRef.current) {
+        clearTimeout(advanceTimerRef.current);
+      }
+    };
+  }, []);
 
   const isTimeUp = questionTimer.secondsLeft <= 0;
 
@@ -446,14 +467,14 @@ export const LiveRoom = () => {
   const currentQ = questions[currentQIdx];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', maxWidth: '1080px', margin: '0 auto', width: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '1080px', margin: '0 auto', width: '100%', padding: '0 0.75rem', boxSizing: 'border-box' }}>
       {/* 1. LOBBY STATE */}
       {roomState === 'lobby' && (
-        <Card style={{ padding: '2.5rem', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.5rem' }}>
+        <Card style={{ padding: 'clamp(1.25rem, 4vw, 2.5rem)', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.25rem', width: '100%', boxSizing: 'border-box' }}>
           <div
             style={{
-              width: '56px',
-              height: '56px',
+              width: '52px',
+              height: '52px',
               borderRadius: '16px',
               backgroundColor: 'var(--primary)',
               color: 'var(--on-primary)',
@@ -462,18 +483,18 @@ export const LiveRoom = () => {
               justifyContent: 'center',
             }}
           >
-            <Users size={28} />
+            <Users size={26} />
           </div>
 
           <div>
             <Badge variant="primary" style={{ marginBottom: '0.4rem' }}>
               LIVE MULTIPLAYER LOBBY
             </Badge>
-            <h1 style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--text)' }}>
+            <h1 style={{ fontSize: 'clamp(1.4rem, 4vw, 2.2rem)', fontWeight: 900, color: 'var(--text)', lineHeight: 1.3 }}>
               {quizInfo?.title || 'Live Assessment Session'}
             </h1>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', marginTop: '0.25rem' }}>
-              Room Code: <strong style={{ color: 'var(--primary)', fontSize: '1.2rem', letterSpacing: '0.1em' }}>{code.toUpperCase()}</strong>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', marginTop: '0.25rem' }}>
+              Room Code: <strong style={{ color: 'var(--primary)', fontSize: 'clamp(1.1rem, 3.5vw, 1.35rem)', letterSpacing: '0.1em' }}>{code.toUpperCase()}</strong>
             </p>
           </div>
 
@@ -482,17 +503,17 @@ export const LiveRoom = () => {
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '0.65rem',
+              gap: '0.5rem',
               backgroundColor: 'var(--surface-2)',
               border: '1px solid var(--border)',
-              padding: '0.6rem 1.4rem',
+              padding: '0.5rem 1.2rem',
               borderRadius: 'var(--radius-pill)',
               fontWeight: 800,
-              fontSize: '0.95rem',
+              fontSize: '0.9rem',
               color: 'var(--text)',
             }}
           >
-            <Users size={18} color="var(--primary)" />
+            <Users size={16} color="var(--primary)" />
             <span>{participants.length} Player{participants.length !== 1 ? 's' : ''} in Lobby</span>
           </div>
 
@@ -503,17 +524,18 @@ export const LiveRoom = () => {
               maxWidth: '750px',
               display: 'flex',
               flexWrap: 'wrap',
-              gap: '0.65rem',
+              gap: '0.5rem',
               justifyContent: 'center',
-              padding: '1.25rem',
+              padding: '1rem',
               backgroundColor: 'var(--surface-2)',
               borderRadius: 'var(--radius-card)',
               border: '1px solid var(--border)',
-              minHeight: '100px',
+              minHeight: '80px',
+              boxSizing: 'border-box',
             }}
           >
             {participants.length === 0 ? (
-              <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 'auto' }}>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: 'auto' }}>
                 Waiting for participants to join with code {code.toUpperCase()}...
               </span>
             ) : (
@@ -524,18 +546,22 @@ export const LiveRoom = () => {
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '0.45rem',
+                    gap: '0.4rem',
                     backgroundColor: 'var(--surface)',
                     border: '1px solid var(--border)',
-                    padding: '0.4rem 0.85rem',
+                    padding: '0.35rem 0.8rem',
                     borderRadius: 'var(--radius-pill)',
-                    fontSize: '0.85rem',
+                    fontSize: '0.82rem',
                     fontWeight: 700,
                     color: 'var(--text)',
+                    maxWidth: '100%',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
                   }}
                 >
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'var(--primary)', display: 'inline-block' }} />
-                  <span>{name}</span>
+                  <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: 'var(--primary)', display: 'inline-block', flexShrink: 0 }} />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
                 </div>
               ))
             )}
@@ -543,42 +569,45 @@ export const LiveRoom = () => {
 
           {/* Host Action to Start */}
           {isHost ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.85rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem', width: '100%', maxWidth: '360px' }}>
               <label
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '0.6rem',
+                  gap: '0.55rem',
                   cursor: 'pointer',
-                  padding: '0.55rem 1rem',
+                  padding: '0.5rem 0.9rem',
                   borderRadius: 'var(--radius-md)',
                   backgroundColor: 'var(--surface)',
                   border: '1px solid var(--border)',
-                  fontSize: '0.9rem',
+                  fontSize: '0.85rem',
                   fontWeight: 600,
                   color: 'var(--text)',
                   userSelect: 'none',
+                  width: '100%',
+                  justifyContent: 'center',
+                  boxSizing: 'border-box',
                 }}
               >
                 <input
                   type="checkbox"
                   checked={shuffleQuestionsLobby}
                   onChange={(e) => setShuffleQuestionsLobby(e.target.checked)}
-                  style={{ width: '17px', height: '17px', accentColor: 'var(--primary)', cursor: 'pointer' }}
+                  style={{ width: '16px', height: '16px', accentColor: 'var(--primary)', cursor: 'pointer' }}
                 />
-                <span>🔀 Shuffle questions for all players</span>
+                <span>🔀 Shuffle questions per player</span>
               </label>
 
               <Button
                 onClick={handleStartQuiz}
                 size="lg"
-                style={{ minWidth: '240px', fontSize: '1.05rem' }}
+                style={{ width: '100%', minWidth: '220px', fontSize: '1rem' }}
               >
-                <Play size={20} /> Launch Live Arena{participants.length > 0 ? ` (${participants.length} ready)` : ''}
+                <Play size={18} /> Launch Live Arena{participants.length > 0 ? ` (${participants.length} ready)` : ''}
               </Button>
             </div>
           ) : (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>
               ⏳ Waiting for the host to start the game... Get ready!
             </p>
           )}
@@ -589,68 +618,65 @@ export const LiveRoom = () => {
           2. IN-PROGRESS STATE
       ====================================================== */}
       {roomState === 'in_progress' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%' }}>
 
           {/* ── TOP STATUS BAR (shared) ── */}
           <Card
             style={{
-              padding: '0.9rem 1.5rem',
+              padding: 'clamp(0.65rem, 2vw, 0.85rem) clamp(0.75rem, 3vw, 1.25rem)',
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
               flexWrap: 'wrap',
-              gap: '0.75rem',
+              gap: '0.5rem',
               backgroundColor: 'var(--surface-2)',
               border: '1px solid var(--border)',
+              width: '100%',
+              boxSizing: 'border-box',
             }}
           >
             {/* Left: progress info */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-              <Badge variant="primary" style={{ fontSize: '0.8rem', fontWeight: 900 }}>
-                Q {currentQIdx + 1} / {questions.length}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+              <Badge variant="primary" style={{ fontSize: '0.78rem', fontWeight: 900 }}>
+                Q {Math.min(currentQIdx + 1, questions.length || 1)} / {questions.length}
               </Badge>
-              <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-muted)' }}>
-                {leaderboard.length > 0 ? `${leaderboard.length} Players Live` : `${participants.length} Joined`}
+              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)' }}>
+                {leaderboard.length > 0 ? `${leaderboard.length} Live` : `${participants.length} Joined`}
               </span>
               {currentQ && (
-                <Badge variant="secondary" style={{ fontSize: '0.8rem' }}>
+                <Badge variant="secondary" style={{ fontSize: '0.75rem' }}>
                   {currentQ.points || 10} pts
                 </Badge>
               )}
             </div>
 
             {/* Right: participant score pill OR host controls */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
               <button
                 type="button"
                 onClick={handleToggleSound}
                 aria-label={isMuted ? 'Turn sound on' : 'Mute sound'}
                 title={isMuted ? 'Turn sound on' : 'Mute sound'}
-                style={{ border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', width: '36px', height: '36px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                style={{ border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', width: '34px', height: '34px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
               >
-                {isMuted ? <VolumeX size={17} /> : <Volume2 size={17} />}
+                {isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
               </button>
               {!isHost && (
                 <div
                   style={{
-                    display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+                    display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
                     backgroundColor: 'var(--primary-soft)', border: '1.5px solid var(--primary)',
-                    padding: '0.35rem 0.9rem', borderRadius: 'var(--radius-pill)',
-                    fontWeight: 800, fontSize: '0.88rem', color: 'var(--primary-text)',
+                    padding: '0.28rem 0.75rem', borderRadius: 'var(--radius-pill)',
+                    fontWeight: 800, fontSize: '0.82rem', color: 'var(--primary-text)',
                   }}
                 >
-                  <Zap size={13} /> {myScore} pts
+                  <Zap size={12} /> {myScore} pts
                 </div>
               )}
               {isHost && (
-                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <Button variant="secondary" size="sm" onClick={handleNextQuestion}>
-                    Next <ArrowRight size={14} />
-                  </Button>
-                  <Button variant="danger" size="sm" onClick={handleEndQuiz}>
-                    End Quiz
-                  </Button>
-                </div>
+                <Button variant="danger" size="sm" onClick={handleEndQuiz}>
+                  End Quiz
+                </Button>
               )}
             </div>
           </Card>
@@ -850,15 +876,16 @@ export const LiveRoom = () => {
           )}
 
           {!isHost && !hasCompletedAllQuestions && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%', boxSizing: 'border-box' }}>
 
               {/* Big Timer Card */}
               <Card
                 style={{
-                  padding: '1.5rem 2rem',
+                  padding: 'clamp(0.85rem, 2.5vw, 1.35rem)',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '1.5rem',
+                  justifyContent: 'space-between',
+                  gap: '0.85rem',
                   backgroundColor: questionTimer.secondsLeft <= 5
                     ? 'hsl(0 84% 55% / 0.08)'
                     : 'var(--surface-2)',
@@ -866,33 +893,37 @@ export const LiveRoom = () => {
                     ? '2px solid hsl(0 84% 55%)'
                     : '1px solid var(--border)',
                   transition: 'all 0.3s ease',
+                  width: '100%',
+                  boxSizing: 'border-box',
                 }}
               >
-                <TimerRing
-                  secondsLeft={questionTimer.secondsLeft}
-                  totalSeconds={questionTimer.totalSeconds}
-                  size={80}
-                />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: '0.72rem', fontWeight: 900, color: 'var(--text-muted)', letterSpacing: '0.08em', marginBottom: '0.2rem' }}>
-                    TIME REMAINING
-                  </div>
-                  <div
-                    style={{
-                      fontSize: '3rem',
-                      fontWeight: 900,
-                      lineHeight: 1,
-                      color: questionTimer.secondsLeft <= 5
-                        ? 'hsl(0 84% 55%)'
-                        : questionTimer.secondsLeft <= 10
-                          ? 'hsl(38 95% 50%)'
-                          : 'var(--text)',
-                      fontVariantNumeric: 'tabular-nums',
-                      transition: 'color 0.3s',
-                    }}
-                  >
-                    {questionTimer.secondsLeft}
-                    <span style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--text-muted)', marginLeft: '0.3rem' }}>sec</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0 }}>
+                  <TimerRing
+                    secondsLeft={questionTimer.secondsLeft}
+                    totalSeconds={questionTimer.totalSeconds}
+                    size={58}
+                  />
+                  <div>
+                    <div style={{ fontSize: '0.68rem', fontWeight: 900, color: 'var(--text-muted)', letterSpacing: '0.08em' }}>
+                      TIME REMAINING
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 'clamp(1.8rem, 5vw, 2.7rem)',
+                        fontWeight: 900,
+                        lineHeight: 1,
+                        color: questionTimer.secondsLeft <= 5
+                          ? 'hsl(0 84% 55%)'
+                          : questionTimer.secondsLeft <= 10
+                            ? 'hsl(38 95% 50%)'
+                            : 'var(--text)',
+                        fontVariantNumeric: 'tabular-nums',
+                        transition: 'color 0.3s',
+                      }}
+                    >
+                      {questionTimer.secondsLeft}
+                      <span style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-muted)', marginLeft: '0.25rem' }}>s</span>
+                    </div>
                   </div>
                 </div>
 
@@ -903,8 +934,8 @@ export const LiveRoom = () => {
                       display: 'flex',
                       flexDirection: 'column',
                       alignItems: 'center',
-                      gap: '0.25rem',
-                      padding: '0.75rem 1.1rem',
+                      gap: '0.2rem',
+                      padding: '0.5rem 0.85rem',
                       borderRadius: 'var(--radius-card)',
                       backgroundColor: answerResult === 'correct'
                         ? 'hsl(142 71% 45%)'
@@ -912,15 +943,15 @@ export const LiveRoom = () => {
                           ? 'hsl(0 84% 55%)'
                           : 'var(--primary)',
                       color: '#fff',
-                      transition: 'background-color 0.2s ease',
+                      flexShrink: 0,
                     }}
                   >
                     {answerResult === 'correct' ? (
-                      <><CheckCircle2 size={22} /><span style={{ fontSize: '0.8rem', fontWeight: 800 }}>Correct!</span></>
+                      <><CheckCircle2 size={18} /><span style={{ fontSize: '0.75rem', fontWeight: 800 }}>Correct!</span></>
                     ) : answerResult === 'wrong' ? (
-                      <><XCircle size={22} /><span style={{ fontSize: '0.8rem', fontWeight: 800 }}>Wrong</span></>
+                      <><XCircle size={18} /><span style={{ fontSize: '0.75rem', fontWeight: 800 }}>Wrong</span></>
                     ) : (
-                      <><Clock size={20} /><span style={{ fontSize: '0.78rem', fontWeight: 700 }}>Recorded</span></>
+                      <><Clock size={16} /><span style={{ fontSize: '0.75rem', fontWeight: 700 }}>Recorded</span></>
                     )}
                   </div>
                 ) : isTimeUp ? (
@@ -929,34 +960,41 @@ export const LiveRoom = () => {
                       display: 'flex',
                       flexDirection: 'column',
                       alignItems: 'center',
-                      gap: '0.25rem',
-                      padding: '0.75rem 1.1rem',
+                      gap: '0.2rem',
+                      padding: '0.5rem 0.85rem',
                       borderRadius: 'var(--radius-card)',
                       backgroundColor: 'hsl(38 95% 45%)',
                       color: '#fff',
+                      flexShrink: 0,
                     }}
                   >
-                    <Clock size={20} />
-                    <span style={{ fontSize: '0.78rem', fontWeight: 800 }}>Time's up!</span>
+                    <Clock size={18} />
+                    <span style={{ fontSize: '0.75rem', fontWeight: 800 }}>Time's up!</span>
                   </div>
                 ) : (
                   <div
                     style={{
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.25rem',
-                      padding: '0.75rem 1.1rem', borderRadius: 'var(--radius-card)',
-                      backgroundColor: 'var(--surface)', border: '1px solid var(--border)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: '0.2rem',
+                      padding: '0.5rem 0.85rem',
+                      borderRadius: 'var(--radius-card)',
+                      backgroundColor: 'var(--surface)',
+                      border: '1px solid var(--border)',
                       color: 'var(--text-muted)',
+                      flexShrink: 0,
                     }}
                   >
-                    <Clock size={20} />
-                    <span style={{ fontSize: '0.78rem', fontWeight: 700 }}>Answer!</span>
+                    <Clock size={18} />
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700 }}>Choose!</span>
                   </div>
                 )}
               </Card>
 
               {/* Question Card */}
-              <Card style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                <h2 style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--text)', lineHeight: 1.45 }}>
+              <Card style={{ padding: 'clamp(1rem, 3.5vw, 1.85rem)', display: 'flex', flexDirection: 'column', gap: '1.15rem', width: '100%', boxSizing: 'border-box' }}>
+                <h2 style={{ fontSize: 'clamp(1.1rem, 3.2vw, 1.4rem)', fontWeight: 800, color: 'var(--text)', lineHeight: 1.4, wordBreak: 'break-word' }}>
                   {currentQ?.title || 'Loading question...'}
                 </h2>
 
@@ -965,40 +1003,40 @@ export const LiveRoom = () => {
                   {answerResult ? (
                     <motion.div
                       key="result-banner"
-                      initial={{ opacity: 0, y: -10 }}
+                      initial={{ opacity: 0, y: -8 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0 }}
                       style={{
-                        display: 'flex', alignItems: 'center', gap: '0.75rem',
-                        padding: '0.85rem 1.25rem', borderRadius: 'var(--radius-btn)',
+                        display: 'flex', alignItems: 'center', gap: '0.65rem',
+                        padding: '0.75rem 1rem', borderRadius: 'var(--radius-btn)',
                         backgroundColor: answerResult === 'correct' ? 'hsl(142 71% 45%)' : 'hsl(0 84% 55%)',
-                        color: '#fff', fontWeight: 800, fontSize: '0.95rem',
+                        color: '#fff', fontWeight: 800, fontSize: '0.9rem',
                       }}
                     >
                       {answerResult === 'correct'
-                        ? <><CheckCircle2 size={18} /> Correct! +{currentQ?.points || 10} points — waiting for next question</>
-                        : <><XCircle size={18} /> Wrong answer — the correct one is highlighted above</>}
+                        ? <><CheckCircle2 size={18} flexShrink={0} /> Correct! +{currentQ?.points || 10} pts — moving to next</>
+                        : <><XCircle size={18} flexShrink={0} /> Wrong answer — moving to next</>}
                     </motion.div>
                   ) : isTimeUp && !hasAnsweredCurrent ? (
                     <motion.div
                       key="timeup-banner"
-                      initial={{ opacity: 0, y: -10 }}
+                      initial={{ opacity: 0, y: -8 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0 }}
                       style={{
-                        display: 'flex', alignItems: 'center', gap: '0.75rem',
-                        padding: '0.85rem 1.25rem', borderRadius: 'var(--radius-btn)',
+                        display: 'flex', alignItems: 'center', gap: '0.65rem',
+                        padding: '0.75rem 1rem', borderRadius: 'var(--radius-btn)',
                         backgroundColor: 'hsl(38 95% 45%)',
-                        color: '#fff', fontWeight: 800, fontSize: '0.95rem',
+                        color: '#fff', fontWeight: 800, fontSize: '0.9rem',
                       }}
                     >
-                      <Clock size={18} /> Time’s up! You did not select an answer in time. The correct answer is highlighted above.
+                      <Clock size={18} flexShrink={0} /> Time’s up! Moving to next question...
                     </motion.div>
                   ) : null}
                 </AnimatePresence>
 
                 {/* Options grid */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '0.85rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: '0.75rem', width: '100%', boxSizing: 'border-box' }}>
                   {(currentQ?.options || []).map((optionText, idx) => {
                     const letter = String.fromCharCode(65 + idx);
                     const optStyle = getOptionStyle(optionText, idx);
@@ -1009,13 +1047,14 @@ export const LiveRoom = () => {
                     return (
                       <motion.div
                         key={idx}
-                        whileHover={!isOptionDisabled ? { scale: 1.02 } : {}}
-                        whileTap={!isOptionDisabled ? { scale: 0.97 } : {}}
+                        whileHover={!isOptionDisabled ? { scale: 1.015 } : {}}
+                        whileTap={!isOptionDisabled ? { scale: 0.98 } : {}}
                         onClick={() => { if (!isOptionDisabled) handleAnswerSubmit(optionText, idx); }}
                         style={{
-                          display: 'flex', alignItems: 'center', gap: '0.85rem',
-                          padding: '1.15rem 1.25rem', borderRadius: 'var(--radius-card)',
-                          transition: 'all 0.2s ease', minHeight: '62px', userSelect: 'none',
+                          display: 'flex', alignItems: 'center', gap: '0.75rem',
+                          padding: '0.85rem 1.05rem', borderRadius: 'var(--radius-card)',
+                          transition: 'all 0.2s ease', minHeight: '52px', userSelect: 'none',
+                          wordBreak: 'break-word', width: '100%', boxSizing: 'border-box',
                           ...optStyle,
                         }}
                       >
@@ -1029,7 +1068,7 @@ export const LiveRoom = () => {
                         >
                           {showCorrectIcon ? <Check size={16} /> : showWrongIcon ? <XCircle size={14} /> : letter}
                         </div>
-                        <span style={{ fontSize: '0.98rem', fontWeight: 600, flex: 1 }}>
+                        <span style={{ fontSize: '0.94rem', fontWeight: 600, flex: 1, lineHeight: 1.35 }}>
                           {optionText}
                         </span>
                       </motion.div>
@@ -1038,12 +1077,12 @@ export const LiveRoom = () => {
                 </div>
 
                 {hasAnsweredCurrent && (
-                  <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.88rem', fontWeight: 600 }}>
+                  <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 600 }}>
                     ⚡ Moving to the next question...
                   </div>
                 )}
                 {isTimeUp && !hasAnsweredCurrent && (
-                  <div style={{ textAlign: 'center', color: 'hsl(38 95% 45%)', fontSize: '0.88rem', fontWeight: 700 }}>
+                  <div style={{ textAlign: 'center', color: 'hsl(38 95% 45%)', fontSize: '0.85rem', fontWeight: 700 }}>
                     ⌛ Time expired. Preparing the next question...
                   </div>
                 )}
@@ -1056,17 +1095,17 @@ export const LiveRoom = () => {
       {/* 3. ENDED STATE - Podium */}
 
       {roomState === 'ended' && (
-        <Card style={{ padding: '2.5rem', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2rem' }}>
+        <Card style={{ padding: 'clamp(1.25rem, 4vw, 2.5rem)', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.5rem', width: '100%', boxSizing: 'border-box' }}>
           <PartyPopperBoom leaderboard={leaderboard} />
 
           <div>
-            <Badge variant="primary" style={{ marginBottom: '0.5rem' }}>
+            <Badge variant="primary" style={{ marginBottom: '0.4rem' }}>
               LIVE TOURNAMENT CONCLUDED
             </Badge>
-            <h1 style={{ fontSize: '2.4rem', fontWeight: 900, color: 'var(--text)' }}>
+            <h1 style={{ fontSize: 'clamp(1.5rem, 4vw, 2.4rem)', fontWeight: 900, color: 'var(--text)' }}>
               Champions Podium
             </h1>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginTop: '0.2rem' }}>
               Final tournament standings and rankings
             </p>
           </div>
@@ -1077,47 +1116,50 @@ export const LiveRoom = () => {
               display: 'flex',
               alignItems: 'flex-end',
               justifyContent: 'center',
-              gap: '1.25rem',
+              gap: 'clamp(0.35rem, 1.8vw, 1.25rem)',
               width: '100%',
               maxWidth: '650px',
-              paddingTop: '1.5rem',
+              paddingTop: '1rem',
+              boxSizing: 'border-box',
             }}
           >
-            {/* 2nd Place (Left) - Deep Emerald */}
+            {/* 2nd Place (Left) */}
             {leaderboard[1] ? (
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.35rem' }}>
                 <div
                   style={{
-                    width: '60px',
-                    height: '60px',
+                    width: 'clamp(42px, 10vw, 60px)',
+                    height: 'clamp(42px, 10vw, 60px)',
                     borderRadius: '50%',
                     backgroundColor: 'var(--hero)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    fontSize: '1.4rem',
+                    fontSize: 'clamp(1.1rem, 2.5vw, 1.4rem)',
                     color: 'var(--on-primary)',
                     border: '2px solid var(--border)',
                   }}
                 >
                   2
                 </div>
-                <div style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--text)' }}>{leaderboard[1].name}</div>
-                <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--primary-text)' }}>
+                <div style={{ fontWeight: 800, fontSize: 'clamp(0.78rem, 2vw, 0.95rem)', color: 'var(--text)', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {leaderboard[1].name}
+                </div>
+                <div style={{ fontSize: 'clamp(0.72rem, 1.8vw, 0.85rem)', fontWeight: 700, color: 'var(--primary-text)' }}>
                   {leaderboard[1].score} pts
                 </div>
                 <div
                   style={{
                     width: '100%',
-                    height: '110px',
+                    height: 'clamp(75px, 15vw, 110px)',
                     backgroundColor: 'var(--surface-2)',
                     border: '1.5px solid var(--border)',
                     borderBottom: 'none',
-                    borderRadius: '1rem 1rem 0 0',
+                    borderRadius: '0.75rem 0.75rem 0 0',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    fontSize: '1.8rem',
+                    fontSize: 'clamp(1.2rem, 3vw, 1.8rem)',
                     fontWeight: 900,
                     color: 'var(--text-muted)',
                   }}
@@ -1125,22 +1167,22 @@ export const LiveRoom = () => {
                   2nd
                 </div>
               </div>
-            ) : <div style={{ flex: 1 }} />}
+            ) : <div style={{ flex: 1, minWidth: 0 }} />}
 
-            {/* 1st Place (Center - Highest) - Solid Brand Primary Red */}
+            {/* 1st Place (Center - Highest) */}
             {leaderboard[0] ? (
-              <div style={{ flex: 1.15, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
-                <div style={{ fontSize: '1.75rem' }}>👑</div>
+              <div style={{ flex: 1.15, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.35rem' }}>
+                <div style={{ fontSize: 'clamp(1.3rem, 3vw, 1.75rem)' }}>👑</div>
                 <div
                   style={{
-                    width: '74px',
-                    height: '74px',
+                    width: 'clamp(52px, 12vw, 74px)',
+                    height: 'clamp(52px, 12vw, 74px)',
                     borderRadius: '50%',
                     backgroundColor: 'var(--primary)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    fontSize: '1.8rem',
+                    fontSize: 'clamp(1.3rem, 3.2vw, 1.8rem)',
                     color: 'var(--on-primary)',
                     border: '3px solid var(--surface)',
                     boxShadow: 'var(--card-shadow)',
@@ -1148,24 +1190,24 @@ export const LiveRoom = () => {
                 >
                   1
                 </div>
-                <div style={{ fontWeight: 900, fontSize: '1.1rem', color: 'var(--primary-text)' }}>
+                <div style={{ fontWeight: 900, fontSize: 'clamp(0.85rem, 2.2vw, 1.1rem)', color: 'var(--primary-text)', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {leaderboard[0].name}
                 </div>
-                <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--text)' }}>
+                <div style={{ fontSize: 'clamp(0.75rem, 2vw, 0.95rem)', fontWeight: 800, color: 'var(--text)' }}>
                   {leaderboard[0].score} pts
                 </div>
                 <div
                   style={{
                     width: '100%',
-                    height: '150px',
+                    height: 'clamp(100px, 20vw, 150px)',
                     backgroundColor: 'var(--primary)',
                     border: '2px solid var(--primary-hover)',
                     borderBottom: 'none',
-                    borderRadius: '1.25rem 1.25rem 0 0',
+                    borderRadius: '0.85rem 0.85rem 0 0',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    fontSize: '2.4rem',
+                    fontSize: 'clamp(1.5rem, 3.8vw, 2.4rem)',
                     fontWeight: 900,
                     color: 'var(--on-primary)',
                   }}
@@ -1173,43 +1215,45 @@ export const LiveRoom = () => {
                   1st
                 </div>
               </div>
-            ) : <div style={{ flex: 1.15 }} />}
+            ) : <div style={{ flex: 1.15, minWidth: 0 }} />}
 
-            {/* 3rd Place (Right) - Light Red Tint */}
+            {/* 3rd Place (Right) */}
             {leaderboard[2] ? (
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.35rem' }}>
                 <div
                   style={{
-                    width: '60px',
-                    height: '60px',
+                    width: 'clamp(42px, 10vw, 60px)',
+                    height: 'clamp(42px, 10vw, 60px)',
                     borderRadius: '50%',
                     backgroundColor: 'var(--primary-soft)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    fontSize: '1.4rem',
+                    fontSize: 'clamp(1.1rem, 2.5vw, 1.4rem)',
                     color: 'var(--primary-text)',
                     border: '1.5px solid var(--border)',
                   }}
                 >
                   3
                 </div>
-                <div style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--text)' }}>{leaderboard[2].name}</div>
-                <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--primary-text)' }}>
+                <div style={{ fontWeight: 800, fontSize: 'clamp(0.78rem, 2vw, 0.95rem)', color: 'var(--text)', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {leaderboard[2].name}
+                </div>
+                <div style={{ fontSize: 'clamp(0.72rem, 1.8vw, 0.85rem)', fontWeight: 700, color: 'var(--primary-text)' }}>
                   {leaderboard[2].score} pts
                 </div>
                 <div
                   style={{
                     width: '100%',
-                    height: '80px',
+                    height: 'clamp(55px, 11vw, 80px)',
                     backgroundColor: 'var(--surface-2)',
                     border: '1.5px solid var(--border)',
                     borderBottom: 'none',
-                    borderRadius: '1rem 1rem 0 0',
+                    borderRadius: '0.75rem 0.75rem 0 0',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    fontSize: '1.8rem',
+                    fontSize: 'clamp(1rem, 2.8vw, 1.5rem)',
                     fontWeight: 900,
                     color: 'var(--text-muted)',
                   }}
@@ -1217,7 +1261,7 @@ export const LiveRoom = () => {
                   3rd
                 </div>
               </div>
-            ) : <div style={{ flex: 1 }} />}
+            ) : <div style={{ flex: 1, minWidth: 0 }} />}
           </div>
 
           <Button onClick={() => navigate('/dashboard')} style={{ marginTop: '1rem' }}>
