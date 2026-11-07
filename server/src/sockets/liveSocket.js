@@ -289,8 +289,10 @@ class LiveSessionManager {
 
         if (room.status === 'active' && room.questions && room.questions.length > 0) {
           const shouldShuffle = room.settings?.shuffleOptions !== false;
+          const resumeQIdx = (existingAnswers || []).length;
           socket.emit('quiz:started', {
-            questionIdx: room.currentQuestionIdx || 0,
+            questionIdx: resumeQIdx,
+            currentScore: existingScore,
             questions: buildSanitizedQuestions(room, room.questions, shouldShuffle),
             title: room.quizTitle,
           });

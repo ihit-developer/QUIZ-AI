@@ -133,20 +133,27 @@ export const LiveRoom = () => {
       setQuestions(loadedQuestions);
       questionsRef.current = loadedQuestions;
 
-      const qIdx = 0;
+      const qIdx = Number(data.questionIdx) || 0;
       currentQIdxRef.current = qIdx;
       hasAnsweredRef.current = false;
       hasCompletedRef.current = false;
       setCurrentQIdx(qIdx);
+      if (data.currentScore !== undefined) {
+        setMyScore(data.currentScore);
+      }
       setSelectedOption(null);
       setSelectedOptionIdx(null);
       setHasAnsweredCurrent(false);
       setAnswerResult(null);
-      setHasCompletedAllQuestions(false);
 
-      const firstQ = loadedQuestions[0];
-      const initialSeconds = Number(firstQ?.timeLimitSeconds) || 30;
-      setQuestionTimer({ secondsLeft: initialSeconds, totalSeconds: initialSeconds });
+      if (qIdx >= loadedQuestions.length && loadedQuestions.length > 0) {
+        setHasCompletedAllQuestions(true);
+      } else {
+        setHasCompletedAllQuestions(false);
+        const currentQ = loadedQuestions[qIdx];
+        const initialSeconds = Number(currentQ?.timeLimitSeconds) || 30;
+        setQuestionTimer({ secondsLeft: initialSeconds, totalSeconds: initialSeconds });
+      }
 
       soundManager.resumeAudio().then(() => soundManager.startLiveArenaBGM()).catch(() => {});
       toast.success('🚀 Quiz started! Good luck!');
