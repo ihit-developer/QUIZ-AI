@@ -40,6 +40,7 @@ export const LiveRoom = () => {
   const [leaderboard, setLeaderboard] = useState([]);
   // stores the plain string text of the selected option
   const [selectedOption, setSelectedOption] = useState(null);
+  const [selectedOptionIdx, setSelectedOptionIdx] = useState(null);
   // questions: [{ id, title, options: string[], correctIndex, points, timeLimitSeconds }]
   const [questions, setQuestions] = useState([]);
   const [isMuted, setIsMuted] = useState(false);
@@ -126,6 +127,7 @@ export const LiveRoom = () => {
       if (data.questions && data.questions.length > 0) setQuestions(data.questions);
       setCurrentQIdx(data.questionIdx || 0);
       setSelectedOption(null);
+      setSelectedOptionIdx(null);
       setHasAnsweredCurrent(false);
       setAnswerResult(null);
       setSubmissionStats({ submittedCount: 0, totalParticipants: 0 });
@@ -141,6 +143,7 @@ export const LiveRoom = () => {
     const onQuestionAdvanced = (data) => {
       setCurrentQIdx(data.questionIdx || 0);
       setSelectedOption(null);
+      setSelectedOptionIdx(null);
       setHasAnsweredCurrent(false);
       setAnswerResult(null);
       setSubmissionStats({ submittedCount: 0, totalParticipants: 0 });
@@ -159,14 +162,8 @@ export const LiveRoom = () => {
 
     const onAnswerConfirmed = (data) => {
       const isCorrect = Boolean(data.isCorrect);
-      setAnswerResult(isCorrect ? 'correct' : 'wrong');
+      setAnswerResult((prev) => prev || (isCorrect ? 'correct' : 'wrong'));
       setMyScore(data.currentScore || 0);
-      if (isCorrect) {
-        soundManager.playCorrect();
-        launchSprinkles();
-      } else {
-        soundManager.playIncorrect();
-      }
     };
 
     const onQuizEnded = (data) => {
@@ -245,7 +242,16 @@ export const LiveRoom = () => {
     const pointsAwarded = isCorrect ? (currentQuestion.points || 10) : 0;
 
     setSelectedOption(optionText);
+    setSelectedOptionIdx(optionIndex);
     setHasAnsweredCurrent(true);
+    setAnswerResult(isCorrect ? 'correct' : 'wrong');
+
+    if (isCorrect) {
+      soundManager.playCorrect();
+      launchSprinkles();
+    } else {
+      soundManager.playIncorrect();
+    }
 
     const socket = getSocket();
     socket.emit('participant:submit-answer', {
@@ -257,7 +263,7 @@ export const LiveRoom = () => {
       userId: user?.id || user?._id || null,
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasAnsweredCurrent, questions, currentQIdx, code, user]);
+  }, [hasAnsweredCurrent, questions, currentQIdx, code, user, launchSprinkles]);
 
   // Helper: compute per-option styling based on answered state
   const getOptionStyle = (optionText, optionIndex) => {
@@ -271,7 +277,7 @@ export const LiveRoom = () => {
     }
     const currentQuestion = questions[currentQIdx];
     const isCorrectOption = currentQuestion && optionIndex === currentQuestion.correctIndex;
-    const isSelectedOption = selectedOption === optionText;
+    const isSelectedOption = selectedOptionIdx === optionIndex || selectedOption === optionText;
 
     if (isCorrectOption) {
       return {
@@ -660,15 +666,28 @@ export const LiveRoom = () => {
                 {hasAnsweredCurrent ? (
                   <div
                     style={{
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.25rem',
-                      padding: '0.75rem 1.1rem', borderRadius: 'var(--radius-card)',
-                      backgroundColor: answerResult === 'correct' ? 'hsl(142 71% 45%)' : 'hsl(0 84% 55%)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: '0.25rem',
+                      padding: '0.75rem 1.1rem',
+                      borderRadius: 'var(--radius-card)',
+                      backgroundColor: answerResult === 'correct'
+                        ? 'hsl(142 71% 45%)'
+                        : answerResult === 'wrong'
+                          ? 'hsl(0 84% 55%)'
+                          : 'var(--primary)',
                       color: '#fff',
+                      transition: 'background-color 0.2s ease',
                     }}
                   >
-                    {answerResult === 'correct'
-                      ? <><CheckCircle2 size={22} /><span style={{ fontSize: '0.8rem', fontWeight: 800 }}>Correct!</span></>
-                      : <><XCircle size={22} /><span style={{ fontSize: '0.8rem', fontWeight: 800 }}>Wrong</span></>}
+                    {answerResult === 'correct' ? (
+                      <><CheckCircle2 size={22} /><span style={{ fontSize: '0.8rem', fontWeight: 800 }}>Correct!</span></>
+                    ) : answerResult === 'wrong' ? (
+                      <><XCircle size={22} /><span style={{ fontSize: '0.8rem', fontWeight: 800 }}>Wrong</span></>
+                    ) : (
+                      <><Clock size={20} /><span style={{ fontSize: '0.78rem', fontWeight: 700 }}>Recorded</span></>
+                    )}
                   </div>
                 ) : (
                   <div
@@ -719,7 +738,7 @@ export const LiveRoom = () => {
                     const letter = String.fromCharCode(65 + idx);
                     const optStyle = getOptionStyle(optionText, idx);
                     const showCorrectIcon = hasAnsweredCurrent && idx === currentQ?.correctIndex;
-                    const showWrongIcon = hasAnsweredCurrent && selectedOption === optionText && idx !== currentQ?.correctIndex;
+                    const showWrongIcon = hasAnsweredCurrent && (selectedOptionIdx === idx || selectedOption === optionText) && idx !== currentQ?.correctIndex;
 
                     return (
                       <motion.div

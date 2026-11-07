@@ -241,6 +241,22 @@ class LiveSessionManager {
           count: participantList.length,
           status: room.status,
         });
+
+        if (room.status === 'active' && room.questions && room.questions.length > 0) {
+          const sanitizedQuestions = (room.questions || []).map((q) => ({
+            id: q._id || q.id,
+            title: q.title,
+            options: (q.options || []).map((o) => (typeof o === 'string' ? o : o.text)),
+            correctIndex: (q.options || []).findIndex((o) => o.isCorrect === true || o.isCorrect === 'true' || Boolean(o.isCorrect)),
+            points: q.points || 10,
+            timeLimitSeconds: q.timeLimitSeconds || 30,
+          }));
+          socket.emit('quiz:started', {
+            questionIdx: room.currentQuestionIdx || 0,
+            questions: sanitizedQuestions,
+            title: room.quizTitle,
+          });
+        }
       });
 
       // Helper to start per-question server timer
@@ -328,8 +344,8 @@ class LiveSessionManager {
           const sanitizedQuestions = (room.questions || []).map((q) => ({
             id: q._id || q.id,
             title: q.title,
-            options: (q.options || []).map((o) => o.text),
-            correctIndex: (q.options || []).findIndex((o) => o.isCorrect),
+            options: (q.options || []).map((o) => (typeof o === 'string' ? o : o.text)),
+            correctIndex: (q.options || []).findIndex((o) => o.isCorrect === true || o.isCorrect === 'true' || Boolean(o.isCorrect)),
             points: q.points || 10,
             timeLimitSeconds: q.timeLimitSeconds || 30,
           }));
