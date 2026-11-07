@@ -288,12 +288,22 @@ class LiveSessionManager {
         });
 
         if (room.status === 'active' && room.questions && room.questions.length > 0) {
-          const shouldShuffle = room.settings?.shuffleOptions !== false;
+          const participant = room.participants.get(socket.id);
+          let assignedQuestions = participant?.assignedQuestions;
+          if (!assignedQuestions || assignedQuestions.length === 0) {
+            const playerQuestionsSource = room.questions.length > 1
+              ? shuffleArray(room.questions)
+              : room.questions;
+            assignedQuestions = buildSanitizedQuestions(room, playerQuestionsSource, true);
+            if (participant) {
+              participant.assignedQuestions = assignedQuestions;
+            }
+          }
           const resumeQIdx = (existingAnswers || []).length;
           socket.emit('quiz:started', {
             questionIdx: resumeQIdx,
             currentScore: existingScore,
-            questions: buildSanitizedQuestions(room, room.questions, shouldShuffle),
+            questions: assignedQuestions,
             title: room.quizTitle,
           });
         }
@@ -301,6 +311,7 @@ class LiveSessionManager {
 
       // Fisher-Yates shuffle helper
       const shuffleArray = (arr) => {
+        if (!arr || arr.length <= 1) return arr ? [...arr] : [];
         const copy = [...arr];
         for (let i = copy.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
@@ -309,19 +320,30 @@ class LiveSessionManager {
         return copy;
       };
 
-      // Helper to sanitize questions and optionally shuffle options per participant
-      const buildSanitizedQuestions = (room, questions, shouldShuffleOptions = false) => {
+      // Helper to sanitize questions and shuffle options per participant
+      const buildSanitizedQuestions = (room, questions, shouldShuffleOptions = true) => {
         return (questions || []).map((q, idx) => {
-          const rawOptions = (q.options || []).map((o) => ({
-            text: typeof o === 'string' ? o : o.text,
-            isCorrect: Boolean(o.isCorrect === true || o.isCorrect === 'true' || o.isCorrect),
-          }));
+          const rawOptions = (q.options || []).map((o) => {
+            if (typeof o === 'string') {
+              return { text: o, isCorrect: false };
+            }
+            return {
+              text: o.text,
+              isCorrect: Boolean(o.isCorrect === true || o.isCorrect === 'true' || o.isCorrect),
+            };
+          });
 
-          const finalOptions = shouldShuffleOptions ? shuffleArray(rawOptions) : rawOptions;
-          const correctIndex = finalOptions.findIndex((o) => o.isCorrect);
+          const finalOptions = shouldShuffleOptions && rawOptions.length > 1
+            ? shuffleArray(rawOptions)
+            : [...rawOptions];
+
+          let correctIndex = finalOptions.findIndex((o) => o.isCorrect);
+          if (correctIndex < 0 && finalOptions.length > 0) {
+            correctIndex = 0;
+          }
 
           return {
-            id: q._id || q.id,
+            id: String(q._id || q.id),
             title: q.title,
             options: finalOptions.map((o) => o.text),
             correctIndex: correctIndex >= 0 ? correctIndex : 0,
@@ -440,23 +462,16 @@ class LiveSessionManager {
 
           this.clearRoomTimers(code);
 
-          // If shuffleQuestions is enabled, randomize question sequence for this game session
+          // In live multiplayer quizzes, shuffle questions per participant unless explicitly false
           const shouldShuffleQuestions = Boolean(
-            shuffleQuestions === true ||
-            room.settings?.shuffleQuestions === true
+            shuffleQuestions !== false &&
+            room.settings?.shuffleQuestions !== false
           );
-
-          if (shouldShuffleQuestions && room.questions && room.questions.length > 1) {
-            room.questions = shuffleArray(room.questions);
-            console.log(`[Live Session] Questions shuffled for room ${code} (${room.questions.length} questions)`);
-          }
 
           room.status = 'active';
           room.startedAt = new Date();
           room.currentQuestionIdx = 0;
           await liveRoomStore.set(code, room);
-
-          const shouldShuffleOptions = room.settings?.shuffleOptions !== false;
 
           // 1. Host receives standard question order for public projection/review
           socket.emit('quiz:started', {
@@ -465,14 +480,21 @@ class LiveSessionManager {
             title: room.quizTitle,
           });
 
-          // 2. Each participant receives their own personalized option shuffle to prevent screen peeking
-          for (const [pSocketId] of room.participants.entries()) {
+          // 2. Each participant receives their OWN personalized question shuffle AND option shuffle!
+          for (const [pSocketId, participant] of room.participants.entries()) {
             if (pSocketId !== socket.id) {
               const pSocket = io.sockets.sockets.get(pSocketId);
               if (pSocket) {
+                const playerQuestionsSource = shouldShuffleQuestions && room.questions.length > 1
+                  ? shuffleArray(room.questions)
+                  : room.questions;
+
+                const personalizedQuestions = buildSanitizedQuestions(room, playerQuestionsSource, true);
+                participant.assignedQuestions = personalizedQuestions;
+
                 pSocket.emit('quiz:started', {
                   questionIdx: 0,
-                  questions: buildSanitizedQuestions(room, room.questions, shouldShuffleOptions),
+                  questions: personalizedQuestions,
                   title: room.quizTitle,
                 });
               }
@@ -508,7 +530,7 @@ class LiveSessionManager {
       });
 
       // 4. Participant submits an answer in live mode (direct advance per player)
-      socket.on('participant:submit-answer', async ({ roomCode, isCorrect, pointsAwarded, questionIdx, selectedOptionText }) => {
+      socket.on('participant:submit-answer', async ({ roomCode, isCorrect, pointsAwarded, questionIdx, questionId, selectedOptionText }) => {
         const code = roomCode.toUpperCase();
         const room = await liveRoomStore.get(code) || this.rooms.get(code);
         if (room && room.participants.has(socket.id)) {
@@ -525,8 +547,11 @@ class LiveSessionManager {
 
           participant.lastAnsweredQIdx = targetQIdx;
 
-          // Ultimate Server Authority: verify option text directly against room question
-          const currentQ = room.questions && room.questions[targetQIdx] ? room.questions[targetQIdx] : room.questions[0];
+          // Ultimate Server Authority: verify option text directly against matching room question
+          const currentQ = (room.questions || []).find((q) =>
+            String(q._id || q.id) === String(questionId)
+          ) || (room.questions && room.questions[targetQIdx]) || room.questions[0];
+
           const matchedOpt = (currentQ?.options || []).find((o) => {
             const text = typeof o === 'string' ? o : o.text;
             return text?.trim().toLowerCase() === String(selectedOptionText || '').trim().toLowerCase();

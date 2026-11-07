@@ -318,10 +318,12 @@ export const LiveRoom = () => {
     soundManager.playIncorrect();
     toast('⏰ Time is up for this question!', { id: 'time-up-toast', icon: '⌛' });
 
+    const currentQuestion = questions[currentQIdxRef.current];
     const socket = getSocket();
     socket.emit('participant:submit-answer', {
       roomCode: code.toUpperCase(),
       questionIdx: currentQIdxRef.current,
+      questionId: currentQuestion?.id || currentQuestion?._id || null,
       selectedOptionText: '',
       isCorrect: false,
       pointsAwarded: 0,
@@ -331,7 +333,7 @@ export const LiveRoom = () => {
     setTimeout(() => {
       moveToNextQuestion();
     }, 600);
-  }, [code, user, moveToNextQuestion]);
+  }, [questions, code, user, moveToNextQuestion]);
 
   // Pass both the option text and its index so we can compute correctness
   const handleAnswerSubmit = useCallback((optionText, optionIndex) => {
@@ -361,6 +363,7 @@ export const LiveRoom = () => {
     socket.emit('participant:submit-answer', {
       roomCode: code.toUpperCase(),
       questionIdx: currentQIdx,
+      questionId: currentQuestion.id || currentQuestion._id || null,
       selectedOptionText: optionText,
       isCorrect,
       pointsAwarded,
