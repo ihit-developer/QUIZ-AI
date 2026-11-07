@@ -125,12 +125,18 @@ export const LiveRoom = () => {
       setRoomState('in_progress');
       // data.questions[i].options is string[] from server
       if (data.questions && data.questions.length > 0) setQuestions(data.questions);
-      setCurrentQIdx(data.questionIdx || 0);
+      const qIdx = data.questionIdx || 0;
+      setCurrentQIdx(qIdx);
       setSelectedOption(null);
       setSelectedOptionIdx(null);
       setHasAnsweredCurrent(false);
       setAnswerResult(null);
       setSubmissionStats({ submittedCount: 0, totalParticipants: 0 });
+
+      const firstQ = data.questions ? data.questions[qIdx] : null;
+      const initialSeconds = Number(firstQ?.timeLimitSeconds) || 30;
+      setQuestionTimer({ secondsLeft: initialSeconds, totalSeconds: initialSeconds });
+
       soundManager.resumeAudio().then(() => soundManager.startLiveArenaBGM()).catch(() => {});
       toast.success('🚀 Quiz started! Good luck!');
     };
@@ -140,13 +146,27 @@ export const LiveRoom = () => {
       if (data.secondsLeft <= 3 && data.secondsLeft > 0) soundManager.playTick();
     };
 
+    const onTimeUp = () => {
+      setQuestionTimer((prev) => ({ ...prev, secondsLeft: 0 }));
+      soundManager.playIncorrect();
+      toast('⏰ Time is up for this question!', { id: 'time-up-toast', icon: '⌛' });
+    };
+
+    const onAllAnswered = () => {
+      toast('🎯 All players have answered!', { id: 'all-answered-toast', icon: '👏' });
+    };
+
     const onQuestionAdvanced = (data) => {
-      setCurrentQIdx(data.questionIdx || 0);
+      const qIdx = data.questionIdx || 0;
+      setCurrentQIdx(qIdx);
       setSelectedOption(null);
       setSelectedOptionIdx(null);
       setHasAnsweredCurrent(false);
       setAnswerResult(null);
       setSubmissionStats({ submittedCount: 0, totalParticipants: 0 });
+
+      const nextLimit = Number(data.totalSeconds) || 30;
+      setQuestionTimer({ secondsLeft: nextLimit, totalSeconds: nextLimit });
       launchSprinkles(10);
     };
 
@@ -185,6 +205,8 @@ export const LiveRoom = () => {
     socket.on('lobby:updated', onLobbyUpdated);
     socket.on('quiz:started', onQuizStarted);
     socket.on('question:timer-tick', onTimerTick);
+    socket.on('question:time-up', onTimeUp);
+    socket.on('question:all-answered', onAllAnswered);
     socket.on('question:advanced', onQuestionAdvanced);
     socket.on('leaderboard:updated', onLeaderboardUpdated);
     socket.on('participant:answer-confirmed', onAnswerConfirmed);
@@ -197,6 +219,8 @@ export const LiveRoom = () => {
       socket.off('lobby:updated', onLobbyUpdated);
       socket.off('quiz:started', onQuizStarted);
       socket.off('question:timer-tick', onTimerTick);
+      socket.off('question:time-up', onTimeUp);
+      socket.off('question:all-answered', onAllAnswered);
       socket.off('question:advanced', onQuestionAdvanced);
       socket.off('leaderboard:updated', onLeaderboardUpdated);
       socket.off('participant:answer-confirmed', onAnswerConfirmed);
@@ -232,7 +256,7 @@ export const LiveRoom = () => {
 
   // Pass both the option text and its index so we can compute correctness
   const handleAnswerSubmit = useCallback((optionText, optionIndex) => {
-    if (hasAnsweredCurrent) return;
+    if (hasAnsweredCurrent || questionTimer.secondsLeft <= 0) return;
 
     const currentQuestion = questions[currentQIdx];
     if (!currentQuestion) return;
@@ -263,11 +287,13 @@ export const LiveRoom = () => {
       userId: user?.id || user?._id || null,
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasAnsweredCurrent, questions, currentQIdx, code, user, launchSprinkles]);
+  }, [hasAnsweredCurrent, questionTimer.secondsLeft, questions, currentQIdx, code, user, launchSprinkles]);
+
+  const isTimeUp = questionTimer.secondsLeft <= 0;
 
   // Helper: compute per-option styling based on answered state
   const getOptionStyle = (optionText, optionIndex) => {
-    if (!hasAnsweredCurrent) {
+    if (!hasAnsweredCurrent && !isTimeUp) {
       return {
         backgroundColor: 'var(--surface-2)',
         color: 'var(--text)',
@@ -689,6 +715,22 @@ export const LiveRoom = () => {
                       <><Clock size={20} /><span style={{ fontSize: '0.78rem', fontWeight: 700 }}>Recorded</span></>
                     )}
                   </div>
+                ) : isTimeUp ? (
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: '0.25rem',
+                      padding: '0.75rem 1.1rem',
+                      borderRadius: 'var(--radius-card)',
+                      backgroundColor: 'hsl(38 95% 45%)',
+                      color: '#fff',
+                    }}
+                  >
+                    <Clock size={20} />
+                    <span style={{ fontSize: '0.78rem', fontWeight: 800 }}>Time's up!</span>
+                  </div>
                 ) : (
                   <div
                     style={{
@@ -710,9 +752,9 @@ export const LiveRoom = () => {
                   {currentQ?.title || 'Loading question...'}
                 </h2>
 
-                {/* Answer result banner */}
+                {/* Answer result banner or Time's up banner */}
                 <AnimatePresence>
-                  {answerResult && (
+                  {answerResult ? (
                     <motion.div
                       key="result-banner"
                       initial={{ opacity: 0, y: -10 }}
@@ -729,7 +771,22 @@ export const LiveRoom = () => {
                         ? <><CheckCircle2 size={18} /> Correct! +{currentQ?.points || 10} points — waiting for next question</>
                         : <><XCircle size={18} /> Wrong answer — the correct one is highlighted above</>}
                     </motion.div>
-                  )}
+                  ) : isTimeUp && !hasAnsweredCurrent ? (
+                    <motion.div
+                      key="timeup-banner"
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0 }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '0.75rem',
+                        padding: '0.85rem 1.25rem', borderRadius: 'var(--radius-btn)',
+                        backgroundColor: 'hsl(38 95% 45%)',
+                        color: '#fff', fontWeight: 800, fontSize: '0.95rem',
+                      }}
+                    >
+                      <Clock size={18} /> Time’s up! You did not select an answer in time. The correct answer is highlighted above.
+                    </motion.div>
+                  ) : null}
                 </AnimatePresence>
 
                 {/* Options grid */}
@@ -737,15 +794,16 @@ export const LiveRoom = () => {
                   {(currentQ?.options || []).map((optionText, idx) => {
                     const letter = String.fromCharCode(65 + idx);
                     const optStyle = getOptionStyle(optionText, idx);
-                    const showCorrectIcon = hasAnsweredCurrent && idx === currentQ?.correctIndex;
+                    const isOptionDisabled = hasAnsweredCurrent || isTimeUp;
+                    const showCorrectIcon = (hasAnsweredCurrent || isTimeUp) && idx === currentQ?.correctIndex;
                     const showWrongIcon = hasAnsweredCurrent && (selectedOptionIdx === idx || selectedOption === optionText) && idx !== currentQ?.correctIndex;
 
                     return (
                       <motion.div
                         key={idx}
-                        whileHover={!hasAnsweredCurrent ? { scale: 1.02 } : {}}
-                        whileTap={!hasAnsweredCurrent ? { scale: 0.97 } : {}}
-                        onClick={() => { if (!hasAnsweredCurrent) handleAnswerSubmit(optionText, idx); }}
+                        whileHover={!isOptionDisabled ? { scale: 1.02 } : {}}
+                        whileTap={!isOptionDisabled ? { scale: 0.97 } : {}}
+                        onClick={() => { if (!isOptionDisabled) handleAnswerSubmit(optionText, idx); }}
                         style={{
                           display: 'flex', alignItems: 'center', gap: '0.85rem',
                           padding: '1.15rem 1.25rem', borderRadius: 'var(--radius-card)',
@@ -774,6 +832,11 @@ export const LiveRoom = () => {
                 {hasAnsweredCurrent && (
                   <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.88rem', fontWeight: 600 }}>
                     ⏳ Waiting for other players... Next question coming soon!
+                  </div>
+                )}
+                {isTimeUp && !hasAnsweredCurrent && (
+                  <div style={{ textAlign: 'center', color: 'hsl(38 95% 45%)', fontSize: '0.88rem', fontWeight: 700 }}>
+                    ⌛ Time expired. Preparing the next question...
                   </div>
                 )}
               </Card>

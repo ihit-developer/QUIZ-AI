@@ -145,9 +145,12 @@ class LiveSessionManager {
           status: existingRoom ? existingRoom.status : 'lobby',
           currentQuestionIdx: existingRoom ? existingRoom.currentQuestionIdx : 0,
           questions,
+          settings: quizDoc?.settings || null,
           passingScorePercent: quizDoc?.settings?.passingScorePercent || 60,
           participants: existingParticipants,
           startedAt: existingRoom ? existingRoom.startedAt : null,
+          timerInterval: null,
+          advanceTimeout: null,
         };
 
         this.rooms.set(code, roomObj);
@@ -206,9 +209,12 @@ class LiveSessionManager {
             status: 'lobby',
             currentQuestionIdx: 0,
             questions,
+            settings: quizDoc?.settings || null,
             passingScorePercent: quizDoc?.settings?.passingScorePercent || 60,
             participants: new Map(),
             startedAt: null,
+            timerInterval: null,
+            advanceTimeout: null,
           };
           this.rooms.set(code, room);
           await liveRoomStore.set(code, room);
@@ -243,13 +249,13 @@ class LiveSessionManager {
         });
 
         if (room.status === 'active' && room.questions && room.questions.length > 0) {
-          const sanitizedQuestions = (room.questions || []).map((q) => ({
+          const sanitizedQuestions = (room.questions || []).map((q, idx) => ({
             id: q._id || q.id,
             title: q.title,
             options: (q.options || []).map((o) => (typeof o === 'string' ? o : o.text)),
             correctIndex: (q.options || []).findIndex((o) => o.isCorrect === true || o.isCorrect === 'true' || Boolean(o.isCorrect)),
             points: q.points || 10,
-            timeLimitSeconds: q.timeLimitSeconds || 30,
+            timeLimitSeconds: getQuestionTimeLimit(room, idx),
           }));
           socket.emit('quiz:started', {
             questionIdx: room.currentQuestionIdx || 0,
@@ -259,65 +265,107 @@ class LiveSessionManager {
         }
       });
 
-      // Helper to start per-question server timer
-      const startQuestionTimer = async (code) => {
-        const room = await liveRoomStore.get(code) || this.rooms.get(code);
-        if (!room) return;
+      // Helper to compute question time limit safely
+      const getQuestionTimeLimit = (room, qIdx) => {
+        const q = room.questions && room.questions[qIdx];
+        const qSec = Number(q?.timeLimitSeconds);
+        if (qSec && qSec > 0) return qSec;
+        if (room.settings?.timeLimitMinutes && room.questions?.length) {
+          return Math.max(10, Math.min(120, Math.round((Number(room.settings.timeLimitMinutes) * 60) / room.questions.length)));
+        }
+        return 30;
+      };
 
+      // Helper to cleanly clear any running timer or advance timeout
+      const clearRoomTimers = (room) => {
+        if (!room) return;
         if (room.timerInterval) {
           clearInterval(room.timerInterval);
           room.timerInterval = null;
         }
+        if (room.advanceTimeout) {
+          clearTimeout(room.advanceTimeout);
+          room.advanceTimeout = null;
+        }
+      };
 
-        const currentQ = room.questions[room.currentQuestionIdx];
-        let secondsLeft = currentQ?.timeLimitSeconds || 30;
+      // Helper to advance to next question or end quiz cleanly
+      const advanceToNextOrEnd = async (code) => {
+        const room = await liveRoomStore.get(code) || this.rooms.get(code);
+        if (!room || room.status !== 'active') return;
+
+        clearRoomTimers(room);
+
+        if (room.currentQuestionIdx < room.questions.length - 1) {
+          room.currentQuestionIdx += 1;
+          await liveRoomStore.set(code, room);
+          const nextLimit = getQuestionTimeLimit(room, room.currentQuestionIdx);
+          io.to(code).emit('question:advanced', {
+            questionIdx: room.currentQuestionIdx,
+            totalSeconds: nextLimit,
+            autoAdvanced: true,
+          });
+          startQuestionTimer(code);
+        } else {
+          room.status = 'ended';
+          clearRoomTimers(room);
+          await this.saveFinalAttempts(room);
+          await liveRoomStore.set(code, room);
+          const finalLeaderboard = Array.from(room.participants.values())
+            .sort((a, b) => b.score - a.score)
+            .map((p) => ({
+              name: p.name,
+              score: p.score,
+              percentage: p.percentage || 0,
+              passed: p.passed || false,
+              attemptId: p.savedAttemptId || null,
+              answersCount: (p.answers || []).length,
+            }));
+
+          io.to(code).emit('quiz:ended', {
+            leaderboard: finalLeaderboard,
+            canRestart: false,
+          });
+        }
+      };
+
+      // Helper to start per-question server timer
+      const startQuestionTimer = async (code) => {
+        const room = await liveRoomStore.get(code) || this.rooms.get(code);
+        if (!room || room.status !== 'active') return;
+
+        clearRoomTimers(room);
+
+        const totalSeconds = getQuestionTimeLimit(room, room.currentQuestionIdx);
+        let secondsLeft = totalSeconds;
 
         io.to(code).emit('question:timer-tick', {
           questionIdx: room.currentQuestionIdx,
           secondsLeft,
-          totalSeconds: secondsLeft,
+          totalSeconds,
         });
 
         room.timerInterval = setInterval(async () => {
           secondsLeft -= 1;
           io.to(code).emit('question:timer-tick', {
             questionIdx: room.currentQuestionIdx,
-            secondsLeft,
-            totalSeconds: currentQ?.timeLimitSeconds || 30,
+            secondsLeft: Math.max(0, secondsLeft),
+            totalSeconds,
           });
 
           if (secondsLeft <= 0) {
-            clearInterval(room.timerInterval);
-            room.timerInterval = null;
+            clearRoomTimers(room);
 
-            // Automatically advance to next question or end quiz
-            if (room.currentQuestionIdx < room.questions.length - 1) {
-              room.currentQuestionIdx += 1;
-              io.to(code).emit('question:advanced', {
-                questionIdx: room.currentQuestionIdx,
-                autoAdvanced: true,
-              });
-              startQuestionTimer(code);
-            } else {
-              room.status = 'ended';
-              await this.saveFinalAttempts(room);
-              await liveRoomStore.set(code, room);
-              const finalLeaderboard = Array.from(room.participants.values())
-                .sort((a, b) => b.score - a.score)
-                .map((p) => ({
-                  name: p.name,
-                  score: p.score,
-                  percentage: p.percentage || 0,
-                  passed: p.passed || false,
-                  attemptId: p.savedAttemptId || null,
-                  answersCount: (p.answers || []).length,
-                }));
+            // Notify participants that time expired for this question
+            io.to(code).emit('question:time-up', {
+              questionIdx: room.currentQuestionIdx,
+            });
 
-              io.to(code).emit('quiz:ended', {
-                leaderboard: finalLeaderboard,
-                canRestart: false,
-              });
-            }
+            // 3-second buffer before advancing so participants can review correct answer
+            room.advanceTimeout = setTimeout(async () => {
+              room.advanceTimeout = null;
+              await advanceToNextOrEnd(code);
+            }, 3000);
           }
         }, 1000);
       };
@@ -337,17 +385,18 @@ class LiveSessionManager {
             return;
           }
 
+          clearRoomTimers(room);
           room.status = 'active';
           room.startedAt = new Date();
           room.currentQuestionIdx = 0;
           await liveRoomStore.set(code, room);
-          const sanitizedQuestions = (room.questions || []).map((q) => ({
+          const sanitizedQuestions = (room.questions || []).map((q, idx) => ({
             id: q._id || q.id,
             title: q.title,
             options: (q.options || []).map((o) => (typeof o === 'string' ? o : o.text)),
             correctIndex: (q.options || []).findIndex((o) => o.isCorrect === true || o.isCorrect === 'true' || Boolean(o.isCorrect)),
             points: q.points || 10,
-            timeLimitSeconds: q.timeLimitSeconds || 30,
+            timeLimitSeconds: getQuestionTimeLimit(room, idx),
           }));
 
           io.to(code).emit('quiz:started', {
@@ -417,42 +466,18 @@ class LiveSessionManager {
             currentScore: participant.score,
           });
 
-          // If all joined participants answered, automatically advance after a brief 1.2s delay
+          // If all joined participants answered, provide a clean 2.5s buffer before advancing
           if (totalParticipants > 0 && submittedCount >= totalParticipants) {
-            if (room.timerInterval) {
-              clearInterval(room.timerInterval);
-              room.timerInterval = null;
-            }
-            setTimeout(async () => {
-              if (room.status !== 'active') return;
-              if (room.currentQuestionIdx < room.questions.length - 1) {
-                room.currentQuestionIdx += 1;
-                io.to(code).emit('question:advanced', {
-                  questionIdx: room.currentQuestionIdx,
-                  autoAdvanced: true,
-                });
-                startQuestionTimer(code);
-              } else {
-                room.status = 'ended';
-                await this.saveFinalAttempts(room);
-                await liveRoomStore.set(code, room);
-                const finalLeaderboard = Array.from(room.participants.values())
-                  .sort((a, b) => b.score - a.score)
-                  .map((p) => ({
-                    name: p.name,
-                    score: p.score,
-                    percentage: p.percentage || 0,
-                    passed: p.passed || false,
-                    attemptId: p.savedAttemptId || null,
-                    answersCount: (p.answers || []).length,
-                  }));
+            clearRoomTimers(room);
 
-                io.to(code).emit('quiz:ended', {
-                  leaderboard: finalLeaderboard,
-                  canRestart: false,
-                });
-              }
-            }, 1200);
+            io.to(code).emit('question:all-answered', {
+              questionIdx: room.currentQuestionIdx,
+            });
+
+            room.advanceTimeout = setTimeout(async () => {
+              room.advanceTimeout = null;
+              await advanceToNextOrEnd(code);
+            }, 2500);
           }
         }
       });
@@ -462,14 +487,8 @@ class LiveSessionManager {
         const code = roomCode.toUpperCase();
         const room = await liveRoomStore.get(code) || this.rooms.get(code);
         if (room && room.status === 'active') {
-          if (room.timerInterval) {
-            clearInterval(room.timerInterval);
-            room.timerInterval = null;
-          }
-          room.currentQuestionIdx += 1;
-          await liveRoomStore.set(code, room);
-          io.to(code).emit('question:advanced', { questionIdx: room.currentQuestionIdx });
-          startQuestionTimer(code);
+          clearRoomTimers(room);
+          await advanceToNextOrEnd(code);
         }
       });
 
@@ -478,12 +497,8 @@ class LiveSessionManager {
         const code = roomCode.toUpperCase();
         const room = await liveRoomStore.get(code) || this.rooms.get(code);
         if (room) {
-          if (room.timerInterval) {
-            clearInterval(room.timerInterval);
-            room.timerInterval = null;
-          }
+          clearRoomTimers(room);
           room.status = 'ended';
-          await liveRoomStore.set(code, room);
           await this.saveFinalAttempts(room);
           await liveRoomStore.set(code, room);
 
