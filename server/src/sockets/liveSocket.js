@@ -477,27 +477,54 @@ class LiveSessionManager {
             }
           }
 
-          startQuestionTimer(code);
+          const maxRoomMinutes = Number(room.settings?.timeLimitMinutes) || 0;
+          if (maxRoomMinutes > 0) {
+            const timerState = this.getOrCreateTimerState(code);
+            timerState.advanceTimeout = setTimeout(async () => {
+              console.log(`[Live Session] Room ${code} time limit reached (${maxRoomMinutes}m). Ending quiz.`);
+              const r = await liveRoomStore.get(code) || this.rooms.get(code);
+              if (r && r.status === 'active') {
+                this.clearRoomTimers(code);
+                r.status = 'ended';
+                await this.saveFinalAttempts(r);
+                await liveRoomStore.set(code, r);
+                const finalLeaderboard = Array.from(r.participants.values())
+                  .sort((a, b) => b.score - a.score)
+                  .map((p) => ({
+                    name: p.name,
+                    score: p.score,
+                    percentage: p.percentage || 0,
+                    passed: p.passed || false,
+                    attemptId: p.savedAttemptId || null,
+                    answersCount: (p.answers || []).length,
+                  }));
+                io.to(code).emit('quiz:ended', { leaderboard: finalLeaderboard, canRestart: false });
+              }
+            }, maxRoomMinutes * 60 * 1000);
+          }
         }
       });
 
-      // 4. Participant submits an answer in live mode
+      // 4. Participant submits an answer in live mode (direct advance per player)
       socket.on('participant:submit-answer', async ({ roomCode, isCorrect, pointsAwarded, questionIdx, selectedOptionText }) => {
         const code = roomCode.toUpperCase();
         const room = await liveRoomStore.get(code) || this.rooms.get(code);
         if (room && room.participants.has(socket.id)) {
           const participant = room.participants.get(socket.id);
+          const targetQIdx = Number.isInteger(Number(questionIdx))
+            ? Number(questionIdx)
+            : (participant.answers ? participant.answers.length : 0);
 
-          // SERVER-SIDE GUARD: reject duplicate submissions for the same question
-          if (participant.lastAnsweredQIdx === room.currentQuestionIdx) {
-            console.log(`[Live Session] Duplicate submission rejected for ${participant.name} on Q${room.currentQuestionIdx}`);
+          // Prevent duplicate submission for the same question index
+          if (participant.lastAnsweredQIdx === targetQIdx && (participant.answers || []).length > targetQIdx) {
+            console.log(`[Live Session] Duplicate submission ignored for ${participant.name} on Q${targetQIdx}`);
             return;
           }
 
-          participant.lastAnsweredQIdx = room.currentQuestionIdx;
+          participant.lastAnsweredQIdx = targetQIdx;
 
           // Ultimate Server Authority: verify option text directly against room question
-          const currentQ = room.questions[room.currentQuestionIdx];
+          const currentQ = room.questions && room.questions[targetQIdx] ? room.questions[targetQIdx] : room.questions[0];
           const matchedOpt = (currentQ?.options || []).find((o) => {
             const text = typeof o === 'string' ? o : o.text;
             return text?.trim().toLowerCase() === String(selectedOptionText || '').trim().toLowerCase();
@@ -510,8 +537,6 @@ class LiveSessionManager {
           participant.score += pts;
 
           participant.answers.push({
-            // A room restored from Redis has `id`; an in-memory Mongoose
-            // question has `_id`. Supporting both prevents rejected attempts.
             questionId: currentQ?._id || currentQ?.id || null,
             selectedText: selectedOptionText || '',
             isCorrect: Boolean(actualCorrect),
@@ -526,44 +551,93 @@ class LiveSessionManager {
             .map((p) => ({
               name: p.name,
               score: p.score,
+              answersCount: (p.answers || []).length,
               lastAnsweredQIdx: p.lastAnsweredQIdx,
             }));
 
-          // Count submissions among active connected participants in room
           const roomSockets = io.sockets.adapter.rooms.get(code) || new Set();
           const activeParticipants = Array.from(room.participants.entries())
             .filter(([sockId]) => roomSockets.has(sockId));
           const totalActive = activeParticipants.length;
-          const submittedCount = activeParticipants.filter(
-            ([, p]) => p.lastAnsweredQIdx === room.currentQuestionIdx
-          ).length;
 
           io.to(code).emit('leaderboard:updated', {
             leaderboard: liveLeaderboard,
-            submittedCount,
             totalParticipants: totalActive || room.participants.size,
           });
 
-          // Send feedback directly back to participant with their updated total score
+          // Send confirmation feedback back to participant
           socket.emit('participant:answer-confirmed', {
-            questionIdx: room.currentQuestionIdx,
+            questionIdx: targetQIdx,
             isCorrect: Boolean(actualCorrect),
             currentScore: participant.score,
           });
 
-          // When active participants answer, directly move to next question for all users
-          if (totalActive > 0 && submittedCount >= totalActive) {
+          // Check if all active players have finished all questions in the quiz
+          const totalQuestionsCount = room.questions ? room.questions.length : 0;
+          const allCompleted = totalActive > 0 && activeParticipants.every(
+            ([, p]) => (p.answers || []).length >= totalQuestionsCount
+          );
+
+          if (allCompleted) {
             this.clearRoomTimers(code);
+            room.status = 'ended';
+            await this.saveFinalAttempts(room);
+            await liveRoomStore.set(code, room);
 
-            io.to(code).emit('question:all-answered', {
-              questionIdx: room.currentQuestionIdx,
+            const finalLeaderboard = Array.from(room.participants.values())
+              .sort((a, b) => b.score - a.score)
+              .map((p) => ({
+                name: p.name,
+                score: p.score,
+                percentage: p.percentage || 0,
+                passed: p.passed || false,
+                attemptId: p.savedAttemptId || null,
+                answersCount: (p.answers || []).length,
+              }));
+
+            io.to(code).emit('quiz:ended', {
+              leaderboard: finalLeaderboard,
+              canRestart: false,
             });
+          }
+        }
+      });
 
-            const timerState = this.getOrCreateTimerState(code);
-            timerState.advanceTimeout = setTimeout(async () => {
-              timerState.advanceTimeout = null;
-              await advanceToNextOrEnd(code);
-            }, 400);
+      // 4b. Participant reports completing all questions
+      socket.on('participant:finished-all', async ({ roomCode }) => {
+        const code = roomCode.toUpperCase();
+        const room = await liveRoomStore.get(code) || this.rooms.get(code);
+        if (room && room.status === 'active') {
+          const roomSockets = io.sockets.adapter.rooms.get(code) || new Set();
+          const activeParticipants = Array.from(room.participants.entries())
+            .filter(([sockId]) => roomSockets.has(sockId));
+          const totalActive = activeParticipants.length;
+          const totalQuestionsCount = room.questions ? room.questions.length : 0;
+          const allCompleted = totalActive > 0 && activeParticipants.every(
+            ([, p]) => (p.answers || []).length >= totalQuestionsCount
+          );
+
+          if (allCompleted) {
+            this.clearRoomTimers(code);
+            room.status = 'ended';
+            await this.saveFinalAttempts(room);
+            await liveRoomStore.set(code, room);
+
+            const finalLeaderboard = Array.from(room.participants.values())
+              .sort((a, b) => b.score - a.score)
+              .map((p) => ({
+                name: p.name,
+                score: p.score,
+                percentage: p.percentage || 0,
+                passed: p.passed || false,
+                attemptId: p.savedAttemptId || null,
+                answersCount: (p.answers || []).length,
+              }));
+
+            io.to(code).emit('quiz:ended', {
+              leaderboard: finalLeaderboard,
+              canRestart: false,
+            });
           }
         }
       });
@@ -624,17 +698,26 @@ class LiveSessionManager {
               const activeParticipants = Array.from(room.participants.entries())
                 .filter(([sockId]) => roomSockets.has(sockId));
               const totalActive = activeParticipants.length;
-              const submittedCount = activeParticipants.filter(
-                ([, p]) => p.lastAnsweredQIdx === room.currentQuestionIdx
-              ).length;
+              const totalQuestionsCount = room.questions ? room.questions.length : 0;
+              const allCompleted = totalActive > 0 && activeParticipants.every(
+                ([, p]) => (p.answers || []).length >= totalQuestionsCount
+              );
 
-              if (totalActive > 0 && submittedCount >= totalActive) {
+              if (allCompleted) {
                 this.clearRoomTimers(code);
-                const timerState = this.getOrCreateTimerState(code);
-                timerState.advanceTimeout = setTimeout(async () => {
-                  timerState.advanceTimeout = null;
-                  await advanceToNextOrEnd(code);
-                }, 400);
+                room.status = 'ended';
+                this.saveFinalAttempts(room).then(() => liveRoomStore.set(code, room));
+                const finalLeaderboard = Array.from(room.participants.values())
+                  .sort((a, b) => b.score - a.score)
+                  .map((p) => ({
+                    name: p.name,
+                    score: p.score,
+                    percentage: p.percentage || 0,
+                    passed: p.passed || false,
+                    attemptId: p.savedAttemptId || null,
+                    answersCount: (p.answers || []).length,
+                  }));
+                io.to(code).emit('quiz:ended', { leaderboard: finalLeaderboard, canRestart: false });
               }
             }
             break;

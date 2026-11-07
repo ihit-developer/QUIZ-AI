@@ -45,9 +45,12 @@ export const LiveRoom = () => {
   const [questions, setQuestions] = useState([]);
   const [isMuted, setIsMuted] = useState(false);
   const [hasAnsweredCurrent, setHasAnsweredCurrent] = useState(false);
+  const [hasCompletedAllQuestions, setHasCompletedAllQuestions] = useState(false);
   const [shuffleQuestionsLobby, setShuffleQuestionsLobby] = useState(true);
+  const questionsRef = useRef([]);
   const currentQIdxRef = useRef(0);
   const hasAnsweredRef = useRef(false);
+  const hasCompletedRef = useRef(false);
   // null | 'correct' | 'wrong'
   const [answerResult, setAnswerResult] = useState(null);
   const [myScore, setMyScore] = useState(0);
@@ -126,19 +129,22 @@ export const LiveRoom = () => {
 
     const onQuizStarted = (data) => {
       setRoomState('in_progress');
-      // data.questions[i].options is string[] from server
-      if (data.questions && data.questions.length > 0) setQuestions(data.questions);
-      const qIdx = data.questionIdx || 0;
+      const loadedQuestions = data.questions && data.questions.length > 0 ? data.questions : [];
+      setQuestions(loadedQuestions);
+      questionsRef.current = loadedQuestions;
+
+      const qIdx = 0;
       currentQIdxRef.current = qIdx;
       hasAnsweredRef.current = false;
+      hasCompletedRef.current = false;
       setCurrentQIdx(qIdx);
       setSelectedOption(null);
       setSelectedOptionIdx(null);
       setHasAnsweredCurrent(false);
       setAnswerResult(null);
-      setSubmissionStats({ submittedCount: 0, totalParticipants: 0 });
+      setHasCompletedAllQuestions(false);
 
-      const firstQ = data.questions ? data.questions[qIdx] : null;
+      const firstQ = loadedQuestions[0];
       const initialSeconds = Number(firstQ?.timeLimitSeconds) || 30;
       setQuestionTimer({ secondsLeft: initialSeconds, totalSeconds: initialSeconds });
 
@@ -269,9 +275,60 @@ export const LiveRoom = () => {
     socket.emit('host:finish-quiz', { roomCode: code.toUpperCase() });
   };
 
+  const moveToNextQuestion = useCallback(() => {
+    setCurrentQIdx((prevIdx) => {
+      const qList = questionsRef.current.length > 0 ? questionsRef.current : questions;
+      const nextIdx = prevIdx + 1;
+      if (nextIdx < qList.length) {
+        currentQIdxRef.current = nextIdx;
+        hasAnsweredRef.current = false;
+        setSelectedOption(null);
+        setSelectedOptionIdx(null);
+        setHasAnsweredCurrent(false);
+        setAnswerResult(null);
+
+        const nextLimit = Number(qList[nextIdx]?.timeLimitSeconds) || 30;
+        setQuestionTimer({ secondsLeft: nextLimit, totalSeconds: nextLimit });
+        return nextIdx;
+      } else {
+        setHasCompletedAllQuestions(true);
+        hasCompletedRef.current = true;
+        const socket = getSocket();
+        socket.emit('participant:finished-all', {
+          roomCode: code.toUpperCase(),
+          userId: user?.id || user?._id || null,
+        });
+        return prevIdx;
+      }
+    });
+  }, [questions, code, user]);
+
+  const handleTimeUp = useCallback(() => {
+    if (hasAnsweredRef.current || hasCompletedRef.current) return;
+    hasAnsweredRef.current = true;
+    setHasAnsweredCurrent(true);
+    setAnswerResult('wrong');
+    soundManager.playIncorrect();
+    toast('⏰ Time is up for this question!', { id: 'time-up-toast', icon: '⌛' });
+
+    const socket = getSocket();
+    socket.emit('participant:submit-answer', {
+      roomCode: code.toUpperCase(),
+      questionIdx: currentQIdxRef.current,
+      selectedOptionText: '',
+      isCorrect: false,
+      pointsAwarded: 0,
+      userId: user?.id || user?._id || null,
+    });
+
+    setTimeout(() => {
+      moveToNextQuestion();
+    }, 600);
+  }, [code, user, moveToNextQuestion]);
+
   // Pass both the option text and its index so we can compute correctness
   const handleAnswerSubmit = useCallback((optionText, optionIndex) => {
-    if (hasAnsweredCurrent || questionTimer.secondsLeft <= 0) return;
+    if (hasAnsweredCurrent || questionTimer.secondsLeft <= 0 || hasCompletedAllQuestions) return;
 
     const currentQuestion = questions[currentQIdx];
     if (!currentQuestion) return;
@@ -302,8 +359,36 @@ export const LiveRoom = () => {
       pointsAwarded,
       userId: user?.id || user?._id || null,
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasAnsweredCurrent, questionTimer.secondsLeft, questions, currentQIdx, code, user, launchSprinkles]);
+
+    // Directly advance to next question after a crisp 450ms visual feedback
+    setTimeout(() => {
+      moveToNextQuestion();
+    }, 450);
+  }, [hasAnsweredCurrent, questionTimer.secondsLeft, hasCompletedAllQuestions, questions, currentQIdx, code, user, launchSprinkles, moveToNextQuestion]);
+
+  // Local per-question timer countdown for the active participant
+  useEffect(() => {
+    if (roomState !== 'in_progress' || isHost || hasCompletedAllQuestions || hasAnsweredCurrent) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setQuestionTimer((prev) => {
+        if (prev.secondsLeft <= 1) {
+          clearInterval(timer);
+          handleTimeUp();
+          return { ...prev, secondsLeft: 0 };
+        }
+        const nextSeconds = prev.secondsLeft - 1;
+        if (nextSeconds <= 3 && nextSeconds > 0) {
+          soundManager.playTick();
+        }
+        return { ...prev, secondsLeft: nextSeconds };
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [roomState, isHost, currentQIdx, hasCompletedAllQuestions, hasAnsweredCurrent, handleTimeUp]);
 
   const isTimeUp = questionTimer.secondsLeft <= 0;
 
@@ -515,7 +600,7 @@ export const LiveRoom = () => {
                 Q {currentQIdx + 1} / {questions.length}
               </Badge>
               <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-muted)' }}>
-                {submissionStats.submittedCount} / {submissionStats.totalParticipants} Answered
+                {leaderboard.length > 0 ? `${leaderboard.length} Players Live` : `${participants.length} Joined`}
               </span>
               {currentQ && (
                 <Badge variant="secondary" style={{ fontSize: '0.8rem' }}>
@@ -650,7 +735,21 @@ export const LiveRoom = () => {
                           <span style={{ fontWeight: isTop3 ? 800 : 600, color: 'var(--text)' }}>
                             {entry.name}
                           </span>
-                          {hasAnswered && (
+                          {entry.answersCount !== undefined ? (
+                            <span
+                              style={{
+                                display: 'inline-flex', alignItems: 'center', gap: '0.2rem',
+                                fontSize: '0.75rem', fontWeight: 700,
+                                color: entry.answersCount >= questions.length ? 'hsl(142 71% 40%)' : 'var(--text-muted)',
+                                backgroundColor: entry.answersCount >= questions.length ? 'hsl(142 71% 45% / 0.12)' : 'var(--surface)',
+                                padding: '0.15rem 0.55rem',
+                                borderRadius: 'var(--radius-pill)',
+                                border: '1px solid var(--border)',
+                              }}
+                            >
+                              {entry.answersCount >= questions.length ? 'Finished' : `Q ${entry.answersCount}/${questions.length}`}
+                            </span>
+                          ) : hasAnswered ? (
                             <span
                               style={{
                                 display: 'inline-flex', alignItems: 'center', gap: '0.2rem',
@@ -664,7 +763,7 @@ export const LiveRoom = () => {
                             >
                               <CheckCircle2 size={11} /> Answered
                             </span>
-                          )}
+                          ) : null}
                         </div>
                         <span style={{
                           fontWeight: 900, color: 'var(--primary-text)',
@@ -684,7 +783,63 @@ export const LiveRoom = () => {
           {/* ============================================================
               PARTICIPANT VIEW: Prominent timer + question + options
               ============================================================ */}
-          {!isHost && (
+          {!isHost && hasCompletedAllQuestions && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              <Card style={{ padding: '2.5rem', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', backgroundColor: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                <PartyPopperBoom />
+                <div style={{ fontSize: '3.5rem' }}>🎉</div>
+                <h2 style={{ fontSize: '1.8rem', fontWeight: 900, color: 'var(--text)' }}>
+                  All Questions Completed!
+                </h2>
+                <p style={{ color: 'var(--text-muted)', fontSize: '1rem', maxWidth: '420px', lineHeight: 1.5 }}>
+                  You have completed all {questions.length} questions. Fantastic performance!
+                </p>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.6rem', padding: '0.6rem 1.4rem', borderRadius: 'var(--radius-pill)', backgroundColor: 'var(--primary-soft)', border: '1.5px solid var(--primary)', fontSize: '1.25rem', fontWeight: 900, color: 'var(--primary-text)' }}>
+                  <Zap size={20} /> Your Score: {myScore} pts
+                </div>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+                  Waiting for all players to finish... Live standings are updating below!
+                </p>
+              </Card>
+
+              {/* Live Standings while waiting */}
+              <Card style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div style={{ fontSize: '0.75rem', fontWeight: 900, color: 'var(--text-muted)', letterSpacing: '0.08em' }}>
+                  🏆 LIVE STANDINGS
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {leaderboard.map((entry, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        padding: '0.75rem 1rem', borderRadius: 'var(--radius-btn)',
+                        backgroundColor: idx < 3 ? 'var(--primary-soft)' : 'var(--surface)',
+                        border: '1px solid var(--border)',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                        <span style={{ fontWeight: 900, fontSize: '0.9rem', minWidth: '22px' }}>
+                          {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
+                        </span>
+                        <span style={{ fontWeight: 700, color: 'var(--text)' }}>{entry.name}</span>
+                        {entry.answersCount !== undefined && (
+                          <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', backgroundColor: 'var(--surface-2)', padding: '0.15rem 0.5rem', borderRadius: 'var(--radius-pill)' }}>
+                            {entry.answersCount >= questions.length ? 'Finished' : `Q ${entry.answersCount}/${questions.length}`}
+                          </span>
+                        )}
+                      </div>
+                      <span style={{ fontWeight: 900, color: 'var(--primary-text)', fontSize: '1rem' }}>
+                        {entry.score} pts
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {!isHost && !hasCompletedAllQuestions && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
 
               {/* Big Timer Card */}
@@ -874,7 +1029,7 @@ export const LiveRoom = () => {
 
                 {hasAnsweredCurrent && (
                   <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.88rem', fontWeight: 600 }}>
-                    ⏳ Waiting for other players... Next question coming soon!
+                    ⚡ Moving to the next question...
                   </div>
                 )}
                 {isTimeUp && !hasAnsweredCurrent && (
