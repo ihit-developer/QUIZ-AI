@@ -9,6 +9,29 @@ class LiveSessionManager {
   constructor() {
     // roomCode -> { hostSocketId, quizId, quizTitle, status, currentQuestionIdx, questions, participants: Map(socketId -> { ... }) }
     this.rooms = new Map();
+    // Dedicated in-memory timer map: roomCode -> { timerInterval: null, advanceTimeout: null }
+    this.roomTimers = new Map();
+  }
+
+  clearRoomTimers(code) {
+    const t = this.roomTimers.get(code);
+    if (t) {
+      if (t.timerInterval) {
+        clearInterval(t.timerInterval);
+        t.timerInterval = null;
+      }
+      if (t.advanceTimeout) {
+        clearTimeout(t.advanceTimeout);
+        t.advanceTimeout = null;
+      }
+    }
+  }
+
+  getOrCreateTimerState(code) {
+    if (!this.roomTimers.has(code)) {
+      this.roomTimers.set(code, { timerInterval: null, advanceTimeout: null });
+    }
+    return this.roomTimers.get(code);
   }
 
   // Helper: Persist participant quiz attempt into database on finish
@@ -230,12 +253,28 @@ class LiveSessionManager {
         }
 
         const effectiveName = participantName || `Player_${Math.floor(Math.random() * 900 + 100)}`;
+        let existingScore = 0;
+        let existingAnswers = [];
+
+        // Replace previous socket connection for the same user or name so stale sockets don't accumulate
+        for (const [existingSocketId, p] of room.participants.entries()) {
+          if (existingSocketId !== socket.id) {
+            const isSameUser = userId && p.userId && String(p.userId) === String(userId);
+            const isSameName = !userId && p.name && p.name === effectiveName;
+            if (isSameUser || isSameName) {
+              existingScore = p.score || 0;
+              existingAnswers = p.answers || [];
+              room.participants.delete(existingSocketId);
+            }
+          }
+        }
+
         room.participants.set(socket.id, {
           socketId: socket.id,
           userId: userId || null,
           name: effectiveName,
-          score: 0,
-          answers: [],
+          score: existingScore,
+          answers: existingAnswers,
           lastAnsweredQIdx: -1,
         });
         socket.join(code);
@@ -301,25 +340,12 @@ class LiveSessionManager {
         return 30;
       };
 
-      // Helper to cleanly clear any running timer or advance timeout
-      const clearRoomTimers = (room) => {
-        if (!room) return;
-        if (room.timerInterval) {
-          clearInterval(room.timerInterval);
-          room.timerInterval = null;
-        }
-        if (room.advanceTimeout) {
-          clearTimeout(room.advanceTimeout);
-          room.advanceTimeout = null;
-        }
-      };
-
       // Helper to advance to next question or end quiz cleanly
       const advanceToNextOrEnd = async (code) => {
         const room = await liveRoomStore.get(code) || this.rooms.get(code);
         if (!room || room.status !== 'active') return;
 
-        clearRoomTimers(room);
+        this.clearRoomTimers(code);
 
         if (room.currentQuestionIdx < room.questions.length - 1) {
           room.currentQuestionIdx += 1;
@@ -333,7 +359,7 @@ class LiveSessionManager {
           startQuestionTimer(code);
         } else {
           room.status = 'ended';
-          clearRoomTimers(room);
+          this.clearRoomTimers(code);
           await this.saveFinalAttempts(room);
           await liveRoomStore.set(code, room);
           const finalLeaderboard = Array.from(room.participants.values())
@@ -359,7 +385,7 @@ class LiveSessionManager {
         const room = await liveRoomStore.get(code) || this.rooms.get(code);
         if (!room || room.status !== 'active') return;
 
-        clearRoomTimers(room);
+        this.clearRoomTimers(code);
 
         const totalSeconds = getQuestionTimeLimit(room, room.currentQuestionIdx);
         let secondsLeft = totalSeconds;
@@ -370,7 +396,8 @@ class LiveSessionManager {
           totalSeconds,
         });
 
-        room.timerInterval = setInterval(async () => {
+        const timerState = this.getOrCreateTimerState(code);
+        timerState.timerInterval = setInterval(async () => {
           secondsLeft -= 1;
           io.to(code).emit('question:timer-tick', {
             questionIdx: room.currentQuestionIdx,
@@ -379,24 +406,23 @@ class LiveSessionManager {
           });
 
           if (secondsLeft <= 0) {
-            clearRoomTimers(room);
+            this.clearRoomTimers(code);
 
-            // Notify participants that time expired for this question
             io.to(code).emit('question:time-up', {
               questionIdx: room.currentQuestionIdx,
             });
 
-            // 3-second buffer before advancing so participants can review correct answer
-            room.advanceTimeout = setTimeout(async () => {
-              room.advanceTimeout = null;
+            // Fast 400ms transition directly to next question for all players
+            timerState.advanceTimeout = setTimeout(async () => {
+              timerState.advanceTimeout = null;
               await advanceToNextOrEnd(code);
-            }, 3000);
+            }, 400);
           }
         }, 1000);
       };
 
       // 3. Host starts quiz (Blocked if quiz has ended)
-      socket.on('host:start-quiz', async ({ roomCode }) => {
+      socket.on('host:start-quiz', async ({ roomCode, shuffleQuestions }) => {
         const code = roomCode.toUpperCase();
         const room = await liveRoomStore.get(code) || this.rooms.get(code);
         if (room) {
@@ -410,11 +436,17 @@ class LiveSessionManager {
             return;
           }
 
-          clearRoomTimers(room);
+          this.clearRoomTimers(code);
 
           // If shuffleQuestions is enabled, randomize question sequence for this game session
-          if (room.settings?.shuffleQuestions) {
+          const shouldShuffleQuestions = Boolean(
+            shuffleQuestions === true ||
+            room.settings?.shuffleQuestions === true
+          );
+
+          if (shouldShuffleQuestions && room.questions && room.questions.length > 1) {
             room.questions = shuffleArray(room.questions);
+            console.log(`[Live Session] Questions shuffled for room ${code} (${room.questions.length} questions)`);
           }
 
           room.status = 'active';
@@ -497,16 +529,19 @@ class LiveSessionManager {
               lastAnsweredQIdx: p.lastAnsweredQIdx,
             }));
 
-          // Count submissions on current question
-          const totalParticipants = room.participants.size;
-          const submittedCount = Array.from(room.participants.values()).filter(
-            (p) => p.lastAnsweredQIdx === room.currentQuestionIdx
+          // Count submissions among active connected participants in room
+          const roomSockets = io.sockets.adapter.rooms.get(code) || new Set();
+          const activeParticipants = Array.from(room.participants.entries())
+            .filter(([sockId]) => roomSockets.has(sockId) && sockId !== room.hostSocketId);
+          const totalActive = activeParticipants.length;
+          const submittedCount = activeParticipants.filter(
+            ([, p]) => p.lastAnsweredQIdx === room.currentQuestionIdx
           ).length;
 
           io.to(code).emit('leaderboard:updated', {
             leaderboard: liveLeaderboard,
             submittedCount,
-            totalParticipants,
+            totalParticipants: totalActive || room.participants.size,
           });
 
           // Send feedback directly back to participant with their updated total score
@@ -516,18 +551,19 @@ class LiveSessionManager {
             currentScore: participant.score,
           });
 
-          // If all joined participants answered, provide a clean 2.5s buffer before advancing
-          if (totalParticipants > 0 && submittedCount >= totalParticipants) {
-            clearRoomTimers(room);
+          // When active participants answer, directly move to next question for all users
+          if (totalActive > 0 && submittedCount >= totalActive) {
+            this.clearRoomTimers(code);
 
             io.to(code).emit('question:all-answered', {
               questionIdx: room.currentQuestionIdx,
             });
 
-            room.advanceTimeout = setTimeout(async () => {
-              room.advanceTimeout = null;
+            const timerState = this.getOrCreateTimerState(code);
+            timerState.advanceTimeout = setTimeout(async () => {
+              timerState.advanceTimeout = null;
               await advanceToNextOrEnd(code);
-            }, 2500);
+            }, 400);
           }
         }
       });
@@ -537,7 +573,7 @@ class LiveSessionManager {
         const code = roomCode.toUpperCase();
         const room = await liveRoomStore.get(code) || this.rooms.get(code);
         if (room && room.status === 'active') {
-          clearRoomTimers(room);
+          this.clearRoomTimers(code);
           await advanceToNextOrEnd(code);
         }
       });
@@ -547,7 +583,7 @@ class LiveSessionManager {
         const code = roomCode.toUpperCase();
         const room = await liveRoomStore.get(code) || this.rooms.get(code);
         if (room) {
-          clearRoomTimers(room);
+          this.clearRoomTimers(code);
           room.status = 'ended';
           await this.saveFinalAttempts(room);
           await liveRoomStore.set(code, room);
@@ -574,7 +610,6 @@ class LiveSessionManager {
       socket.on('disconnect', () => {
         for (const [code, room] of this.rooms.entries()) {
           if (room.participants.has(socket.id)) {
-            // Only remove from lobby if not started; keep participant records if in progress/ended
             if (room.status === 'lobby') {
               room.participants.delete(socket.id);
               liveRoomStore.set(code, room);
@@ -583,6 +618,24 @@ class LiveSessionManager {
                 participants: participantList,
                 count: participantList.length,
               });
+            } else if (room.status === 'active') {
+              // Re-check remaining active connected participants
+              const roomSockets = io.sockets.adapter.rooms.get(code) || new Set();
+              const activeParticipants = Array.from(room.participants.entries())
+                .filter(([sockId]) => roomSockets.has(sockId) && sockId !== room.hostSocketId);
+              const totalActive = activeParticipants.length;
+              const submittedCount = activeParticipants.filter(
+                ([, p]) => p.lastAnsweredQIdx === room.currentQuestionIdx
+              ).length;
+
+              if (totalActive > 0 && submittedCount >= totalActive) {
+                this.clearRoomTimers(code);
+                const timerState = this.getOrCreateTimerState(code);
+                timerState.advanceTimeout = setTimeout(async () => {
+                  timerState.advanceTimeout = null;
+                  await advanceToNextOrEnd(code);
+                }, 400);
+              }
             }
             break;
           }

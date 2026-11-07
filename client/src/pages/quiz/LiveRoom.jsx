@@ -45,6 +45,9 @@ export const LiveRoom = () => {
   const [questions, setQuestions] = useState([]);
   const [isMuted, setIsMuted] = useState(false);
   const [hasAnsweredCurrent, setHasAnsweredCurrent] = useState(false);
+  const [shuffleQuestionsLobby, setShuffleQuestionsLobby] = useState(true);
+  const currentQIdxRef = useRef(0);
+  const hasAnsweredRef = useRef(false);
   // null | 'correct' | 'wrong'
   const [answerResult, setAnswerResult] = useState(null);
   const [myScore, setMyScore] = useState(0);
@@ -126,6 +129,8 @@ export const LiveRoom = () => {
       // data.questions[i].options is string[] from server
       if (data.questions && data.questions.length > 0) setQuestions(data.questions);
       const qIdx = data.questionIdx || 0;
+      currentQIdxRef.current = qIdx;
+      hasAnsweredRef.current = false;
       setCurrentQIdx(qIdx);
       setSelectedOption(null);
       setSelectedOptionIdx(null);
@@ -142,14 +147,19 @@ export const LiveRoom = () => {
     };
 
     const onTimerTick = (data) => {
+      // Discard ticks from an outdated question transition
+      if (data && data.questionIdx !== undefined && data.questionIdx !== currentQIdxRef.current) return;
       setQuestionTimer({ secondsLeft: data.secondsLeft, totalSeconds: data.totalSeconds || 30 });
       if (data.secondsLeft <= 3 && data.secondsLeft > 0) soundManager.playTick();
     };
 
-    const onTimeUp = () => {
+    const onTimeUp = (data) => {
+      if (data && data.questionIdx !== undefined && data.questionIdx !== currentQIdxRef.current) return;
       setQuestionTimer((prev) => ({ ...prev, secondsLeft: 0 }));
-      soundManager.playIncorrect();
-      toast('⏰ Time is up for this question!', { id: 'time-up-toast', icon: '⌛' });
+      if (!hasAnsweredRef.current) {
+        soundManager.playIncorrect();
+        toast('⏰ Time is up for this question!', { id: 'time-up-toast', icon: '⌛' });
+      }
     };
 
     const onAllAnswered = () => {
@@ -158,6 +168,8 @@ export const LiveRoom = () => {
 
     const onQuestionAdvanced = (data) => {
       const qIdx = data.questionIdx || 0;
+      currentQIdxRef.current = qIdx;
+      hasAnsweredRef.current = false;
       setCurrentQIdx(qIdx);
       setSelectedOption(null);
       setSelectedOptionIdx(null);
@@ -234,7 +246,10 @@ export const LiveRoom = () => {
   const handleStartQuiz = () => {
     soundManager.resumeAudio().then(() => soundManager.startLiveArenaBGM()).catch(() => {});
     const socket = getSocket();
-    socket.emit('host:start-quiz', { roomCode: code.toUpperCase() });
+    socket.emit('host:start-quiz', {
+      roomCode: code.toUpperCase(),
+      shuffleQuestions: shuffleQuestionsLobby,
+    });
   };
 
   const handleToggleSound = () => {
@@ -268,6 +283,7 @@ export const LiveRoom = () => {
     setSelectedOption(optionText);
     setSelectedOptionIdx(optionIndex);
     setHasAnsweredCurrent(true);
+    hasAnsweredRef.current = true;
     setAnswerResult(isCorrect ? 'correct' : 'wrong');
 
     if (isCorrect) {
@@ -432,13 +448,40 @@ export const LiveRoom = () => {
 
           {/* Host Action to Start */}
           {isHost ? (
-            <Button
-              onClick={handleStartQuiz}
-              size="lg"
-              style={{ minWidth: '240px', fontSize: '1.05rem' }}
-            >
-              <Play size={20} /> Launch Live Arena{participants.length > 0 ? ` (${participants.length} ready)` : ''}
-            </Button>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.85rem' }}>
+              <label
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.6rem',
+                  cursor: 'pointer',
+                  padding: '0.55rem 1rem',
+                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: 'var(--surface)',
+                  border: '1px solid var(--border)',
+                  fontSize: '0.9rem',
+                  fontWeight: 600,
+                  color: 'var(--text)',
+                  userSelect: 'none',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={shuffleQuestionsLobby}
+                  onChange={(e) => setShuffleQuestionsLobby(e.target.checked)}
+                  style={{ width: '17px', height: '17px', accentColor: 'var(--primary)', cursor: 'pointer' }}
+                />
+                <span>🔀 Shuffle questions for all players</span>
+              </label>
+
+              <Button
+                onClick={handleStartQuiz}
+                size="lg"
+                style={{ minWidth: '240px', fontSize: '1.05rem' }}
+              >
+                <Play size={20} /> Launch Live Arena{participants.length > 0 ? ` (${participants.length} ready)` : ''}
+              </Button>
+            </div>
           ) : (
             <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
               ⏳ Waiting for the host to start the game... Get ready!
