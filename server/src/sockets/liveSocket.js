@@ -46,6 +46,7 @@ class LiveSessionManager {
     const totalPointsPossible = (room.questions || []).reduce((acc, q) => acc + (q.points || 10), 0) || 10;
 
     for (const [, p] of room.participants.entries()) {
+      if (p.status === 'cancelled') continue;
       try {
         const score = p.score || 0;
         const percentage = totalPointsPossible > 0 ? Math.round((score / totalPointsPossible) * 100) : 0;
@@ -501,6 +502,9 @@ class LiveSessionManager {
             }
           }
 
+          // Start the server question timer (drives host view clock & auto-advance)
+          startQuestionTimer(code);
+
           const maxRoomMinutes = Number(room.settings?.timeLimitMinutes) || 0;
           if (maxRoomMinutes > 0) {
             const timerState = this.getOrCreateTimerState(code);
@@ -580,16 +584,22 @@ class LiveSessionManager {
               score: p.score,
               answersCount: (p.answers || []).length,
               lastAnsweredQIdx: p.lastAnsweredQIdx,
+              status: p.status || 'active',
             }));
 
           const roomSockets = io.sockets.adapter.rooms.get(code) || new Set();
           const activeParticipants = Array.from(room.participants.entries())
-            .filter(([sockId]) => roomSockets.has(sockId));
+            .filter(([sockId, p]) => roomSockets.has(sockId) && p.status !== 'cancelled');
           const totalActive = activeParticipants.length;
+
+          const answeredCount = activeParticipants.filter(
+            ([, p]) => (p.answers || []).length > room.currentQuestionIdx
+          ).length;
 
           io.to(code).emit('leaderboard:updated', {
             leaderboard: liveLeaderboard,
             totalParticipants: totalActive || room.participants.size,
+            submittedCount: answeredCount,
           });
 
           // Send confirmation feedback back to participant
@@ -620,6 +630,7 @@ class LiveSessionManager {
                 passed: p.passed || false,
                 attemptId: p.savedAttemptId || null,
                 answersCount: (p.answers || []).length,
+                status: p.status || 'active',
               }));
 
             io.to(code).emit('quiz:ended', {
@@ -637,7 +648,7 @@ class LiveSessionManager {
         if (room && room.status === 'active') {
           const roomSockets = io.sockets.adapter.rooms.get(code) || new Set();
           const activeParticipants = Array.from(room.participants.entries())
-            .filter(([sockId]) => roomSockets.has(sockId));
+            .filter(([sockId, p]) => roomSockets.has(sockId) && p.status !== 'cancelled');
           const totalActive = activeParticipants.length;
           const totalQuestionsCount = room.questions ? room.questions.length : 0;
           const allCompleted = totalActive > 0 && activeParticipants.every(
@@ -659,6 +670,118 @@ class LiveSessionManager {
                 passed: p.passed || false,
                 attemptId: p.savedAttemptId || null,
                 answersCount: (p.answers || []).length,
+                status: p.status || 'active',
+              }));
+
+            io.to(code).emit('quiz:ended', {
+              leaderboard: finalLeaderboard,
+              canRestart: false,
+            });
+          }
+        }
+      });
+
+      // 4c. Participant voluntarily cancels / ends their own quiz session
+      socket.on('participant:cancel-quiz', async ({ roomCode }) => {
+        const code = roomCode.toUpperCase();
+        const room = await liveRoomStore.get(code) || this.rooms.get(code);
+        if (room && room.participants.has(socket.id)) {
+          const participant = room.participants.get(socket.id);
+          participant.status = 'cancelled';
+          participant.cancelledAt = new Date();
+          await liveRoomStore.set(code, room);
+
+          // Save partial cancelled attempt so participant record is preserved
+          try {
+            const Attempt = require('../models/Attempt');
+            const quizId = room.quizId?._id || room.quizId?.id || room.quizId;
+            const totalPointsPossible = (room.questions || []).reduce((acc, q) => acc + (q.points || 10), 0) || 10;
+            const score = participant.score || 0;
+            const percentage = totalPointsPossible > 0 ? Math.round((score / totalPointsPossible) * 100) : 0;
+
+            const attemptDoc = {
+              quizId,
+              userId: participant.userId?._id || participant.userId || null,
+              guestSession: participant.userId ? null : { name: participant.name, guestId: 'guest_' + Math.random().toString(36).substring(2, 8) },
+              score,
+              percentage,
+              totalPointsPossible,
+              passed: false,
+              status: 'cancelled',
+              startedAt: room.startedAt || new Date(),
+              submittedAt: new Date(),
+              durationSeconds: room.startedAt ? Math.round((Date.now() - new Date(room.startedAt).getTime()) / 1000) : 5,
+              answers: (participant.answers || []).map((ans) => ({
+                questionId: ans.questionId?._id || ans.questionId?.id || ans.questionId,
+                selectedOptions: [ans.selectedText || ''],
+                isCorrect: Boolean(ans.isCorrect),
+                pointsAwarded: ans.pointsAwarded || 0,
+                timeSpentSeconds: ans.timeSpentSeconds || 5,
+                answeredAt: new Date(),
+              })),
+            };
+
+            const savedAttempt = await Attempt.create(attemptDoc);
+            participant.savedAttemptId = savedAttempt._id.toString();
+          } catch (err) {
+            console.error(`[Live Session] Error saving cancelled attempt for participant ${participant.name}:`, err.message);
+          }
+
+          // Broadcast cancellation notice to host and players in the room
+          io.to(code).emit('participant:cancelled', {
+            name: participant.name,
+            socketId: socket.id,
+            message: `${participant.name} cancelled and left the quiz.`,
+          });
+
+          // Re-broadcast updated leaderboard with 'cancelled' status
+          const liveLeaderboard = Array.from(room.participants.values())
+            .sort((a, b) => b.score - a.score)
+            .map((p) => ({
+              name: p.name,
+              score: p.score,
+              answersCount: (p.answers || []).length,
+              lastAnsweredQIdx: p.lastAnsweredQIdx,
+              status: p.status || 'active',
+            }));
+
+          const roomSockets = io.sockets.adapter.rooms.get(code) || new Set();
+          const activeParticipants = Array.from(room.participants.entries())
+            .filter(([sockId, p]) => roomSockets.has(sockId) && p.status !== 'cancelled');
+
+          const answeredCount = activeParticipants.filter(
+            ([, p]) => (p.answers || []).length > room.currentQuestionIdx
+          ).length;
+
+          io.to(code).emit('leaderboard:updated', {
+            leaderboard: liveLeaderboard,
+            totalParticipants: activeParticipants.length,
+            submittedCount: answeredCount,
+          });
+
+          // If no active participants remain or all active have finished, end room cleanly
+          const totalQuestionsCount = room.questions ? room.questions.length : 0;
+          const allCompleted = activeParticipants.length === 0 || (
+            activeParticipants.length > 0 &&
+            activeParticipants.every(([, p]) => (p.answers || []).length >= totalQuestionsCount)
+          );
+
+          if (allCompleted && room.status === 'active') {
+            this.clearRoomTimers(code);
+            room.status = 'ended';
+            await this.saveFinalAttempts(room);
+            await liveRoomStore.set(code, room);
+
+            const finalLeaderboard = Array.from(room.participants.values())
+              .sort((a, b) => b.score - a.score)
+              .map((p) => ({
+                name: p.name,
+                score: p.score,
+                percentage: p.percentage || 0,
+                passed: p.passed || false,
+                attemptId: p.savedAttemptId || null,
+                answersCount: (p.answers || []).length,
+                status: p.status || 'active',
               }));
 
             io.to(code).emit('quiz:ended', {
@@ -723,7 +846,7 @@ class LiveSessionManager {
               // Re-check remaining active connected participants
               const roomSockets = io.sockets.adapter.rooms.get(code) || new Set();
               const activeParticipants = Array.from(room.participants.entries())
-                .filter(([sockId]) => roomSockets.has(sockId));
+                .filter(([sockId, p]) => roomSockets.has(sockId) && p.status !== 'cancelled');
               const totalActive = activeParticipants.length;
               const totalQuestionsCount = room.questions ? room.questions.length : 0;
               const allCompleted = totalActive > 0 && activeParticipants.every(
@@ -743,6 +866,7 @@ class LiveSessionManager {
                     passed: p.passed || false,
                     attemptId: p.savedAttemptId || null,
                     answersCount: (p.answers || []).length,
+                    status: p.status || 'active',
                   }));
                 io.to(code).emit('quiz:ended', { leaderboard: finalLeaderboard, canRestart: false });
               }

@@ -55,6 +55,8 @@ export const LiveRoom = () => {
   // null | 'correct' | 'wrong'
   const [answerResult, setAnswerResult] = useState(null);
   const [myScore, setMyScore] = useState(0);
+  const [hasCancelled, setHasCancelled] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
 
   const [questionTimer, setQuestionTimer] = useState({ secondsLeft: 30, totalSeconds: 30 });
   const [submissionStats, setSubmissionStats] = useState({ submittedCount: 0, totalParticipants: 0 });
@@ -70,6 +72,10 @@ export const LiveRoom = () => {
     quizInfo &&
     (String(quizInfo.hostId) === String(user.id || user._id) || user.role === 'admin')
   );
+  const isHostRef = useRef(isHost);
+  useEffect(() => {
+    isHostRef.current = isHost;
+  }, [isHost]);
 
   // Run socket setup ONCE when room code changes — not when isHost changes
   // (isHost changes after quizInfo loads and would cause duplicate listeners)
@@ -162,13 +168,13 @@ export const LiveRoom = () => {
 
     const onTimerTick = (data) => {
       // In host view, show the room clock
-      if (isHost && data) {
+      if (isHostRef.current && data) {
         setQuestionTimer({ secondsLeft: data.secondsLeft, totalSeconds: data.totalSeconds || 30 });
       }
     };
 
-    const onTimeUp = (data) => {
-      if (isHost) {
+    const onTimeUp = () => {
+      if (isHostRef.current) {
         setQuestionTimer((prev) => ({ ...prev, secondsLeft: 0 }));
       }
     };
@@ -179,9 +185,10 @@ export const LiveRoom = () => {
 
     const onQuestionAdvanced = (data) => {
       // Host view follows room advancement
-      if (isHost) {
+      if (isHostRef.current) {
         const qIdx = data.questionIdx || 0;
         setCurrentQIdx(qIdx);
+        currentQIdxRef.current = qIdx;
         const nextLimit = Number(data.totalSeconds) || 30;
         setQuestionTimer({ secondsLeft: nextLimit, totalSeconds: nextLimit });
       }
@@ -195,6 +202,14 @@ export const LiveRoom = () => {
           totalParticipants: data.totalParticipants || data.leaderboard?.length || 0,
         });
       }
+    };
+
+    const onParticipantCancelled = (data) => {
+      toast.error(`⚠️ ${data.name || 'A player'} cancelled their quiz.`, {
+        id: `cancel-${data.socketId || Date.now()}`,
+        duration: 4000,
+        icon: '🚫',
+      });
     };
 
     const onAnswerConfirmed = (data) => {
@@ -226,6 +241,7 @@ export const LiveRoom = () => {
     socket.on('question:all-answered', onAllAnswered);
     socket.on('question:advanced', onQuestionAdvanced);
     socket.on('leaderboard:updated', onLeaderboardUpdated);
+    socket.on('participant:cancelled', onParticipantCancelled);
     socket.on('participant:answer-confirmed', onAnswerConfirmed);
     socket.on('quiz:ended', onQuizEnded);
     socket.on('connect_error', onConnectError);
@@ -240,6 +256,7 @@ export const LiveRoom = () => {
       socket.off('question:all-answered', onAllAnswered);
       socket.off('question:advanced', onQuestionAdvanced);
       socket.off('leaderboard:updated', onLeaderboardUpdated);
+      socket.off('participant:cancelled', onParticipantCancelled);
       socket.off('participant:answer-confirmed', onAnswerConfirmed);
       socket.off('quiz:ended', onQuizEnded);
       socket.off('connect_error', onConnectError);
@@ -272,6 +289,22 @@ export const LiveRoom = () => {
     const socket = getSocket();
     // Correct event name: server listens on 'host:finish-quiz' not 'host:end-quiz'
     socket.emit('host:finish-quiz', { roomCode: code.toUpperCase() });
+  };
+
+  const handleCancelMyQuiz = () => {
+    setShowCancelModal(false);
+    setHasCancelled(true);
+    soundManager.stopBGM();
+    if (advanceTimerRef.current) {
+      clearTimeout(advanceTimerRef.current);
+      advanceTimerRef.current = null;
+    }
+    const socket = getSocket();
+    socket.emit('participant:cancel-quiz', {
+      roomCode: code.toUpperCase(),
+      userId: user?.id || user?._id || null,
+    });
+    toast.error('You have cancelled this quiz session.');
   };
 
   const moveToNextQuestion = useCallback(() => {
@@ -379,7 +412,7 @@ export const LiveRoom = () => {
 
   // 1. Local per-question timer countdown for the active participant
   useEffect(() => {
-    if (roomState !== 'in_progress' || isHost || hasCompletedAllQuestions || hasAnsweredCurrent) {
+    if (roomState !== 'in_progress' || isHost || hasCompletedAllQuestions || hasAnsweredCurrent || hasCancelled) {
       return undefined;
     }
 
@@ -397,7 +430,25 @@ export const LiveRoom = () => {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [roomState, isHost, currentQIdx, hasCompletedAllQuestions, hasAnsweredCurrent]);
+  }, [roomState, isHost, currentQIdx, hasCompletedAllQuestions, hasAnsweredCurrent, hasCancelled]);
+
+  // 1b. Smooth timer countdown for host view
+  useEffect(() => {
+    if (roomState !== 'in_progress' || !isHost) {
+      return undefined;
+    }
+
+    const timer = setInterval(() => {
+      setQuestionTimer((prev) => {
+        if (prev.secondsLeft <= 1) {
+          return { ...prev, secondsLeft: 0 };
+        }
+        return { ...prev, secondsLeft: prev.secondsLeft - 1 };
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [roomState, isHost, currentQIdx]);
 
   // 2. Safely trigger handleTimeUp when secondsLeft reaches 0 outside of state updaters
   useEffect(() => {
@@ -406,11 +457,12 @@ export const LiveRoom = () => {
       !isHost &&
       !hasCompletedAllQuestions &&
       !hasAnsweredCurrent &&
+      !hasCancelled &&
       questionTimer.secondsLeft <= 0
     ) {
       handleTimeUp();
     }
-  }, [questionTimer.secondsLeft, roomState, isHost, hasCompletedAllQuestions, hasAnsweredCurrent, handleTimeUp]);
+  }, [questionTimer.secondsLeft, roomState, isHost, hasCompletedAllQuestions, hasAnsweredCurrent, hasCancelled, handleTimeUp]);
 
   // 3. Clean up advance timer on unmount
   useEffect(() => {
@@ -673,6 +725,25 @@ export const LiveRoom = () => {
                   <Zap size={12} /> {myScore} pts
                 </div>
               )}
+              {!isHost && !hasCompletedAllQuestions && !hasCancelled && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowCancelModal(true)}
+                  style={{
+                    fontSize: '0.78rem',
+                    padding: '0.28rem 0.65rem',
+                    borderColor: 'hsl(0 84% 60% / 0.4)',
+                    color: 'hsl(0 84% 65%)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                  }}
+                  title="Leave / Cancel this quiz"
+                >
+                  <XCircle size={13} /> Cancel Quiz
+                </Button>
+              )}
               {isHost && (
                 <Button variant="danger" size="sm" onClick={handleEndQuiz}>
                   End Quiz
@@ -682,11 +753,11 @@ export const LiveRoom = () => {
           </Card>
 
           {/* ============================================================
-              HOST VIEW: Leaderboard only (full width)
+              HOST VIEW: Question Display, Controls & Live Leaderboard
               ============================================================ */}
           {isHost && (
             <Card style={{ padding: '1.75rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-              {/* Header row */}
+              {/* Header row with timer, counts, and controls */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                   <TimerRing
@@ -708,7 +779,7 @@ export const LiveRoom = () => {
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
                   <div
                     style={{
                       display: 'inline-flex', alignItems: 'center', gap: '0.45rem',
@@ -720,17 +791,95 @@ export const LiveRoom = () => {
                     <CheckCircle2 size={14} />
                     {submissionStats.submittedCount} / {submissionStats.totalParticipants} answered
                   </div>
+                  {currentQIdx < questions.length - 1 ? (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={handleNextQuestion}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontWeight: 800 }}
+                    >
+                      Next Question <ArrowRight size={14} />
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={handleEndQuiz}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontWeight: 800 }}
+                    >
+                      Finish Quiz 🏆
+                    </Button>
+                  )}
                   <div
                     style={{
                       display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
                       padding: '0.45rem 1rem', borderRadius: 'var(--radius-pill)',
-                      backgroundColor: 'var(--primary-soft)', border: '1.5px solid var(--primary)',
-                      color: 'var(--primary-text)', fontWeight: 800, fontSize: '0.88rem',
+                      backgroundColor: 'var(--surface-2)', border: '1px solid var(--border)',
+                      color: 'var(--text)', fontWeight: 800, fontSize: '0.88rem',
                     }}
                   >
-                    <Crown size={14} /> Host View
+                    <Crown size={14} color="var(--primary)" /> Host View
                   </div>
                 </div>
+              </div>
+
+              {/* Host Active Question Card */}
+              <div
+                style={{
+                  padding: '1.25rem',
+                  borderRadius: 'var(--radius-card)',
+                  backgroundColor: 'var(--surface)',
+                  border: '1.5px solid var(--border)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.75rem',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <Badge variant="primary" style={{ fontSize: '0.75rem', fontWeight: 900 }}>
+                    QUESTION {currentQIdx + 1} OF {questions.length}
+                  </Badge>
+                  <Badge variant="secondary" style={{ fontSize: '0.75rem' }}>
+                    {currentQ?.points || 10} pts
+                  </Badge>
+                </div>
+
+                <h2 style={{ fontSize: 'clamp(1.15rem, 2.5vw, 1.45rem)', fontWeight: 800, color: 'var(--text)', margin: '0.25rem 0', lineHeight: 1.4 }}>
+                  {currentQ?.title || 'Preparing question...'}
+                </h2>
+
+                {/* Question options with correct marked for host */}
+                {currentQ?.options && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.6rem', marginTop: '0.25rem' }}>
+                    {currentQ.options.map((optText, optIdx) => {
+                      const isCorrect = optIdx === currentQ.correctIndex;
+                      return (
+                        <div
+                          key={optIdx}
+                          style={{
+                            padding: '0.7rem 0.9rem',
+                            borderRadius: 'var(--radius-btn)',
+                            backgroundColor: isCorrect ? 'hsl(142 71% 45% / 0.12)' : 'var(--surface-2)',
+                            border: isCorrect ? '1.5px solid hsl(142 71% 45%)' : '1px solid var(--border)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: '0.5rem',
+                          }}
+                        >
+                          <span style={{ fontWeight: isCorrect ? 800 : 600, color: isCorrect ? 'hsl(142 71% 35%)' : 'var(--text)', fontSize: '0.88rem' }}>
+                            {optText}
+                          </span>
+                          {isCorrect && (
+                            <Badge variant="primary" style={{ backgroundColor: 'hsl(142 71% 45%)', color: '#fff', fontSize: '0.7rem', padding: '0.1rem 0.45rem' }}>
+                              ✓ Correct
+                            </Badge>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Divider */}
@@ -751,27 +900,41 @@ export const LiveRoom = () => {
                   leaderboard.map((entry, idx) => {
                     const medals = ['🥇', '🥈', '🥉'];
                     const hasAnswered = entry.lastAnsweredQIdx === currentQIdx;
-                    const isTop3 = idx < 3;
+                    const isCancelled = entry.status === 'cancelled';
+                    const isTop3 = idx < 3 && !isCancelled;
                     return (
                       <div
                         key={idx}
                         style={{
                           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                           padding: '0.75rem 1.1rem', borderRadius: 'var(--radius-btn)',
-                          backgroundColor: isTop3 ? 'var(--primary-soft)' : 'var(--surface-2)',
-                          border: isTop3 ? '1.5px solid var(--primary)' : '1px solid var(--border)',
+                          backgroundColor: isCancelled
+                            ? 'hsl(0 84% 55% / 0.05)'
+                            : isTop3 ? 'var(--primary-soft)' : 'var(--surface-2)',
+                          border: isCancelled
+                            ? '1px dashed hsl(0 84% 55% / 0.4)'
+                            : isTop3 ? '1.5px solid var(--primary)' : '1px solid var(--border)',
                           fontSize: '0.92rem',
                           transition: 'all 0.2s',
+                          opacity: isCancelled ? 0.7 : 1,
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                           <span style={{ width: '28px', fontSize: '1.1rem', textAlign: 'center' }}>
-                            {medals[idx] || `#${idx + 1}`}
+                            {isCancelled ? '❌' : (medals[idx] || `#${idx + 1}`)}
                           </span>
-                          <span style={{ fontWeight: isTop3 ? 800 : 600, color: 'var(--text)' }}>
+                          <span style={{
+                            fontWeight: isTop3 ? 800 : 600,
+                            color: isCancelled ? 'hsl(0 84% 65%)' : 'var(--text)',
+                            textDecoration: isCancelled ? 'line-through' : 'none',
+                          }}>
                             {entry.name}
                           </span>
-                          {entry.answersCount !== undefined ? (
+                          {isCancelled ? (
+                            <Badge variant="danger" style={{ backgroundColor: 'hsl(0 84% 55% / 0.15)', color: 'hsl(0 84% 65%)', border: '1px solid hsl(0 84% 55%)', fontSize: '0.72rem', fontWeight: 800 }}>
+                              Cancelled
+                            </Badge>
+                          ) : entry.answersCount !== undefined ? (
                             <span
                               style={{
                                 display: 'inline-flex', alignItems: 'center', gap: '0.2rem',
@@ -802,7 +965,7 @@ export const LiveRoom = () => {
                           ) : null}
                         </div>
                         <span style={{
-                          fontWeight: 900, color: 'var(--primary-text)',
+                          fontWeight: 900, color: isCancelled ? 'hsl(0 84% 65%)' : 'var(--primary-text)',
                           fontVariantNumeric: 'tabular-nums', fontSize: '1rem',
                         }}>
                           {entry.score} pts
@@ -817,9 +980,39 @@ export const LiveRoom = () => {
 
 
           {/* ============================================================
+              PARTICIPANT VIEW: Cancelled State
+              ============================================================ */}
+          {!isHost && hasCancelled && (
+            <Card style={{ padding: 'clamp(1.5rem, 4vw, 2.75rem)', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.25rem', backgroundColor: 'var(--surface-2)', border: '1px solid var(--border)', maxWidth: '580px', margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
+              <div style={{ width: '64px', height: '64px', borderRadius: '50%', backgroundColor: 'hsl(0 84% 55% / 0.12)', color: 'hsl(0 84% 55%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <XCircle size={36} />
+              </div>
+              <div>
+                <Badge variant="danger" style={{ marginBottom: '0.4rem', backgroundColor: 'hsl(0 84% 55% / 0.15)', color: 'hsl(0 84% 65%)', border: '1px solid hsl(0 84% 55%)' }}>
+                  QUIZ CANCELLED
+                </Badge>
+                <h2 style={{ fontSize: 'clamp(1.3rem, 3.5vw, 1.8rem)', fontWeight: 900, color: 'var(--text)' }}>
+                  You Left This Quiz
+                </h2>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', marginTop: '0.35rem', lineHeight: 1.5 }}>
+                  You have voluntarily withdrawn from this live session. Your participation and score of <strong>{myScore} pts</strong> have been recorded, and the host has been notified.
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center', width: '100%', marginTop: '0.5rem' }}>
+                <Button variant="primary" onClick={() => navigate('/dashboard')} style={{ minWidth: '150px' }}>
+                  Dashboard
+                </Button>
+                <Button variant="outline" onClick={() => navigate('/quiz/join')} style={{ minWidth: '150px' }}>
+                  Join Another Quiz
+                </Button>
+              </div>
+            </Card>
+          )}
+
+          {/* ============================================================
               PARTICIPANT VIEW: Prominent timer + question + options
               ============================================================ */}
-          {!isHost && hasCompletedAllQuestions && (
+          {!isHost && !hasCancelled && hasCompletedAllQuestions && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               <Card style={{ padding: '2.5rem', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', backgroundColor: 'var(--surface-2)', border: '1px solid var(--border)' }}>
                 <PartyPopperBoom />
@@ -875,7 +1068,7 @@ export const LiveRoom = () => {
             </div>
           )}
 
-          {!isHost && !hasCompletedAllQuestions && (
+          {!isHost && !hasCancelled && !hasCompletedAllQuestions && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%', boxSizing: 'border-box' }}>
 
               {/* Big Timer Card */}
@@ -1268,6 +1461,68 @@ export const LiveRoom = () => {
             Back to Dashboard
           </Button>
         </Card>
+      )}
+
+      {/* Confirmation Modal for Player Cancelling */}
+      {showCancelModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.65)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '1rem',
+          }}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            style={{
+              backgroundColor: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-card)',
+              padding: '1.75rem',
+              maxWidth: '440px',
+              width: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '1.25rem',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.3)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <div style={{ width: '42px', height: '42px', borderRadius: '50%', backgroundColor: 'hsl(0 84% 55% / 0.12)', color: 'hsl(0 84% 55%)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <XCircle size={24} />
+              </div>
+              <div>
+                <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text)', margin: 0 }}>
+                  Cancel Quiz?
+                </h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: '0.2rem 0 0 0' }}>
+                  Are you sure you want to exit this live quiz?
+                </p>
+              </div>
+            </div>
+
+            <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>
+              Your current answers and score ({myScore} pts) will be saved, and the host will be notified that you cancelled your quiz.
+            </p>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
+              <Button variant="outline" size="sm" onClick={() => setShowCancelModal(false)}>
+                Stay in Quiz
+              </Button>
+              <Button variant="danger" size="sm" onClick={handleCancelMyQuiz}>
+                Yes, Cancel Quiz
+              </Button>
+            </div>
+          </motion.div>
+        </div>
       )}
     </div>
   );

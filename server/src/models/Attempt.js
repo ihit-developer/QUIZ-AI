@@ -59,7 +59,7 @@ const attemptSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['in_progress', 'submitted', 'timed_out', 'disqualified'],
+      enum: ['in_progress', 'submitted', 'timed_out', 'disqualified', 'cancelled'],
       default: 'in_progress',
       index: true,
     },
