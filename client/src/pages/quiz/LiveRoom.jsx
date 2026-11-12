@@ -5,6 +5,7 @@ import { soundManager } from '../../utils/soundManager';
 import {
   Users,
   Play,
+  Pause,
   ArrowRight,
   Trophy,
   CheckCircle2,
@@ -17,6 +18,14 @@ import {
   Check,
   Crown,
   Flame,
+  Lock,
+  Unlock,
+  Maximize2,
+  Minimize2,
+  Download,
+  FileText,
+  BarChart2,
+  UserX,
 } from 'lucide-react';
 import { getSocket } from '../../services/socket';
 import { useAuth } from '../../context/AuthContext';
@@ -86,6 +95,15 @@ export const LiveRoom = () => {
   const [enablePowerUpsLobby, setEnablePowerUpsLobby] = useState(true);
   const [powerUpsEnabled, setPowerUpsEnabled] = useState(true);
   const [lastPointsDelta, setLastPointsDelta] = useState(0);
+
+  // Host Control & Presentation Features State
+  const [isRoomLocked, setIsRoomLocked] = useState(false);
+  const [lockOnStartLobby, setLockOnStartLobby] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [optionDistribution, setOptionDistribution] = useState({});
+  const [isProjectorMode, setIsProjectorMode] = useState(false);
+  const [isKicked, setIsKicked] = useState(false);
+  const [kickedMessage, setKickedMessage] = useState('');
 
   const [questionTimer, setQuestionTimer] = useState({ secondsLeft: 30, totalSeconds: 30 });
   const [submissionStats, setSubmissionStats] = useState({ submittedCount: 0, totalParticipants: 0 });
@@ -165,7 +183,44 @@ export const LiveRoom = () => {
       if (data.participantDetails) {
         setParticipantDetails(data.participantDetails);
       }
+      if (data.isLocked !== undefined) {
+        setIsRoomLocked(Boolean(data.isLocked));
+      }
       if (data.status === 'active') setRoomState('in_progress');
+    };
+
+    const onRoomLockUpdated = (data) => {
+      if (data && data.isLocked !== undefined) {
+        setIsRoomLocked(Boolean(data.isLocked));
+        toast(data.isLocked ? '🔒 Room locked by host (new joins disabled)' : '🔓 Room unlocked by host', {
+          id: 'lock-status-toast',
+        });
+      }
+    };
+
+    const onRoomPauseUpdated = (data) => {
+      if (!data) return;
+      const paused = Boolean(data.isPaused);
+      setIsPaused(paused);
+      if (data.secondsLeft !== undefined) {
+        setQuestionTimer((prev) => ({ ...prev, secondsLeft: data.secondsLeft }));
+      }
+      toast(paused ? '⏸️ Host paused the quiz timer' : '▶️ Host resumed the quiz timer', {
+        id: 'pause-status-toast',
+      });
+    };
+
+    const onParticipantKicked = (data) => {
+      setIsKicked(true);
+      setKickedMessage(data?.message || '🚫 You were removed from this live session by the host.');
+      soundManager.stopBGM();
+      toast.error(data?.message || '🚫 You were removed from this live quiz by the host.', { duration: 5000 });
+    };
+
+    const onRoomLockedReject = (data) => {
+      setIsKicked(true);
+      setKickedMessage(data?.message || '🔒 This room is locked by the host and is not accepting new players.');
+      toast.error(data?.message || '🔒 Room is locked by host.', { duration: 5000 });
     };
 
     const onRoomReaction = (data) => {
@@ -186,6 +241,8 @@ export const LiveRoom = () => {
     const onQuizStarted = (data) => {
       setRoomState('in_progress');
       setPowerUpsEnabled(data.enablePowerUps !== false);
+      if (data.isLocked !== undefined) setIsRoomLocked(Boolean(data.isLocked));
+      if (data.isPaused !== undefined) setIsPaused(Boolean(data.isPaused));
       const loadedQuestions = data.questions && data.questions.length > 0 ? data.questions : [];
       setQuestions(loadedQuestions);
       questionsRef.current = loadedQuestions;
@@ -217,6 +274,9 @@ export const LiveRoom = () => {
     };
 
     const onTimerTick = (data) => {
+      if (data?.isPaused !== undefined) {
+        setIsPaused(Boolean(data.isPaused));
+      }
       // In host view, show the room clock
       if (isHostRef.current && data) {
         setQuestionTimer({ secondsLeft: data.secondsLeft, totalSeconds: data.totalSeconds || 30 });
@@ -234,6 +294,7 @@ export const LiveRoom = () => {
     };
 
     const onQuestionAdvanced = (data) => {
+      setIsPaused(false);
       // Host view follows room advancement
       if (isHostRef.current) {
         const qIdx = data.questionIdx || 0;
@@ -246,6 +307,9 @@ export const LiveRoom = () => {
 
     const onLeaderboardUpdated = (data) => {
       setLeaderboard(data.leaderboard || []);
+      if (data.optionDistribution) {
+        setOptionDistribution(data.optionDistribution);
+      }
       if (data.submittedCount !== undefined) {
         setSubmissionStats({
           submittedCount: data.submittedCount,
@@ -285,6 +349,10 @@ export const LiveRoom = () => {
 
     socket.on('room:ended-lock', onRoomEndedLock);
     socket.on('lobby:updated', onLobbyUpdated);
+    socket.on('room:lock-updated', onRoomLockUpdated);
+    socket.on('room:pause-updated', onRoomPauseUpdated);
+    socket.on('participant:kicked', onParticipantKicked);
+    socket.on('room:locked-reject', onRoomLockedReject);
     socket.on('quiz:started', onQuizStarted);
     socket.on('question:timer-tick', onTimerTick);
     socket.on('question:time-up', onTimeUp);
@@ -301,6 +369,10 @@ export const LiveRoom = () => {
     return () => {
       socket.off('room:ended-lock', onRoomEndedLock);
       socket.off('lobby:updated', onLobbyUpdated);
+      socket.off('room:lock-updated', onRoomLockUpdated);
+      socket.off('room:pause-updated', onRoomPauseUpdated);
+      socket.off('participant:kicked', onParticipantKicked);
+      socket.off('room:locked-reject', onRoomLockedReject);
       socket.off('quiz:started', onQuizStarted);
       socket.off('question:timer-tick', onTimerTick);
       socket.off('question:time-up', onTimeUp);
@@ -324,7 +396,201 @@ export const LiveRoom = () => {
       roomCode: code.toUpperCase(),
       shuffleQuestions: shuffleQuestionsLobby,
       enablePowerUps: enablePowerUpsLobby,
+      lockOnStart: lockOnStartLobby || isRoomLocked,
     });
+  };
+
+  const handleToggleLock = (explicitVal) => {
+    const nextLocked = explicitVal !== undefined ? Boolean(explicitVal) : !isRoomLocked;
+    setIsRoomLocked(nextLocked);
+    const socket = getSocket();
+    socket.emit('host:toggle-lock', {
+      roomCode: code.toUpperCase(),
+      isLocked: nextLocked,
+    });
+  };
+
+  const handleTogglePause = () => {
+    const socket = getSocket();
+    socket.emit('host:toggle-pause', {
+      roomCode: code.toUpperCase(),
+    });
+  };
+
+  const handleKickParticipant = (targetName, targetSocketId = null) => {
+    const socket = getSocket();
+    socket.emit('host:kick-participant', {
+      roomCode: code.toUpperCase(),
+      targetName,
+      targetSocketId,
+    });
+    toast.success(`Removed ${targetName} from the session.`);
+  };
+
+  const handleToggleProjectorMode = () => {
+    const nextMode = !isProjectorMode;
+    setIsProjectorMode(nextMode);
+    try {
+      if (nextMode && document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      } else if (!nextMode && document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
+    } catch {}
+  };
+
+  const handleExportCSV = () => {
+    if (!leaderboard || leaderboard.length === 0) {
+      toast.error('No participant results available to export.');
+      return;
+    }
+
+    const qHeaders = questions.map((_, idx) => `Q${idx + 1} Status`);
+    const headers = [
+      'Rank',
+      'Player Name',
+      'Avatar',
+      'Total Score (pts)',
+      'Percentage (%)',
+      'Pass / Fail Status',
+      'Questions Answered',
+      'Max Streak',
+      'Session Status',
+      ...qHeaders,
+    ];
+
+    const escapeCsv = (val) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+
+    const rows = leaderboard.map((entry, idx) => {
+      const pct = entry.percentage !== undefined
+        ? entry.percentage
+        : (questions.length > 0 ? Math.round(((entry.score || 0) / (questions.length * 10)) * 100) : 0);
+      const passed = entry.passed !== undefined ? entry.passed : (pct >= 60 && entry.status !== 'cancelled');
+      const passLabel = entry.status === 'cancelled' ? 'CANCELLED' : (passed ? 'PASS' : 'FAIL');
+
+      const perQuestionCells = questions.map((q, qIdx) => {
+        const ans = (entry.answers || []).find((a) => String(a.questionId) === String(q.id || q._id)) || (entry.answers && entry.answers[qIdx]);
+        if (!ans) return 'Unanswered';
+        return `${ans.isCorrect ? 'Correct' : 'Wrong'} (${ans.selectedText || 'No choice'})`;
+      });
+
+      return [
+        idx + 1,
+        entry.name || 'Player',
+        entry.avatar || '🦊',
+        entry.score || 0,
+        `${pct}%`,
+        passLabel,
+        `${entry.answersCount ?? (entry.answers || []).length}/${questions.length}`,
+        entry.streak || 0,
+        entry.status || 'completed',
+        ...perQuestionCells,
+      ].map(escapeCsv).join(',');
+    });
+
+    const csvContent = '\uFEFF' + [headers.map(escapeCsv).join(','), ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `${(quizInfo?.title || 'Live_Quiz').replace(/[^a-z0-9]/gi, '_')}_${code.toUpperCase()}_Results.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast.success('📊 CSV Scorecard downloaded!');
+  };
+
+  const handleExportPDF = () => {
+    if (!leaderboard || leaderboard.length === 0) {
+      toast.error('No participant results available to export.');
+      return;
+    }
+
+    const printWindow = window.open('', '_blank', 'width=980,height=720');
+    if (!printWindow) {
+      toast.error('Please allow pop-ups to generate the PDF scorecard.');
+      return;
+    }
+
+    const quizTitle = quizInfo?.title || 'Live Assessment Session';
+    const dateStr = new Date().toLocaleString();
+
+    const rowsHtml = leaderboard.map((entry, idx) => {
+      const pct = entry.percentage !== undefined
+        ? entry.percentage
+        : (questions.length > 0 ? Math.round(((entry.score || 0) / (questions.length * 10)) * 100) : 0);
+      const passed = entry.passed !== undefined ? entry.passed : (pct >= 60 && entry.status !== 'cancelled');
+      const statusBadge = entry.status === 'cancelled'
+        ? '<span style="color:#dc2626;font-weight:700;">CANCELLED</span>'
+        : passed
+          ? '<span style="color:#059669;font-weight:800;">PASS</span>'
+          : '<span style="color:#d97706;font-weight:800;">FAIL</span>';
+
+      const breakdownHtml = questions.map((q, qIdx) => {
+        const ans = (entry.answers || []).find((a) => String(a.questionId) === String(q.id || q._id)) || (entry.answers && entry.answers[qIdx]);
+        if (!ans) return `<span style="display:inline-block;margin:2px;padding:2px 6px;border-radius:4px;background:#f3f4f6;color:#6b7280;font-size:11px;">Q${qIdx + 1}: -</span>`;
+        const bg = ans.isCorrect ? '#d1fae5' : '#fee2e2';
+        const col = ans.isCorrect ? '#065f46' : '#991b1b';
+        return `<span style="display:inline-block;margin:2px;padding:2px 6px;border-radius:4px;background:${bg};color:${col};font-size:11px;font-weight:700;">Q${qIdx + 1}: ${ans.isCorrect ? '✓' : '✗'}</span>`;
+      }).join(' ');
+
+      return `
+        <tr>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;font-weight:800;">#${idx + 1}</td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;font-weight:700;">${entry.avatar || '🦊'} ${entry.name}</td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;font-weight:800;">${entry.score || 0} pts</td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">${pct}%</td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">${statusBadge}</td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">${breakdownHtml || `${entry.answersCount || 0}/${questions.length}`}</td>
+        </tr>
+      `;
+    }).join('');
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>${quizTitle} - Official Scorecard (${code.toUpperCase()})</title>
+          <style>
+            body { font-family: system-ui, -apple-system, sans-serif; padding: 32px; color: #111827; }
+            h1 { margin: 0 0 6px 0; color: #065f46; font-size: 24px; }
+            .meta { color: #4b5563; font-size: 13px; margin-bottom: 24px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+            th { text-align: left; padding: 10px; background: #065f46; color: #fff; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+            @media print { .no-print { display: none; } }
+          </style>
+        </head>
+        <body>
+          <h1>🏆 ${quizTitle} — Official Class Scorecard</h1>
+          <div class="meta">
+            Room Code: <strong>${code.toUpperCase()}</strong> &nbsp;|&nbsp;
+            Total Players: <strong>${leaderboard.length}</strong> &nbsp;|&nbsp;
+            Questions: <strong>${questions.length}</strong> &nbsp;|&nbsp;
+            Generated: ${dateStr}
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Participant</th>
+                <th>Score</th>
+                <th>Accuracy</th>
+                <th>Status</th>
+                <th>Per-Question Breakdown</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+          <script>
+            window.onload = function() { setTimeout(function() { window.print(); }, 250); };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
   };
 
   const handleToggleSound = () => {
@@ -625,7 +891,7 @@ export const LiveRoom = () => {
 
   // 1. Local per-question timer countdown for the active participant
   useEffect(() => {
-    if (roomState !== 'in_progress' || isHost || hasCompletedAllQuestions || hasAnsweredCurrent || hasCancelled) {
+    if (roomState !== 'in_progress' || isHost || isPaused || hasCompletedAllQuestions || hasAnsweredCurrent || hasCancelled || isKicked) {
       return undefined;
     }
 
@@ -643,11 +909,11 @@ export const LiveRoom = () => {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [roomState, isHost, currentQIdx, hasCompletedAllQuestions, hasAnsweredCurrent, hasCancelled]);
+  }, [roomState, isHost, isPaused, currentQIdx, hasCompletedAllQuestions, hasAnsweredCurrent, hasCancelled, isKicked]);
 
   // 1b. Smooth timer countdown for host view
   useEffect(() => {
-    if (roomState !== 'in_progress' || !isHost) {
+    if (roomState !== 'in_progress' || !isHost || isPaused) {
       return undefined;
     }
 
@@ -661,21 +927,23 @@ export const LiveRoom = () => {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [roomState, isHost, currentQIdx]);
+  }, [roomState, isHost, isPaused, currentQIdx]);
 
   // 2. Safely trigger handleTimeUp when secondsLeft reaches 0 outside of state updaters
   useEffect(() => {
     if (
       roomState === 'in_progress' &&
       !isHost &&
+      !isPaused &&
       !hasCompletedAllQuestions &&
       !hasAnsweredCurrent &&
       !hasCancelled &&
+      !isKicked &&
       questionTimer.secondsLeft <= 0
     ) {
       handleTimeUp();
     }
-  }, [questionTimer.secondsLeft, roomState, isHost, hasCompletedAllQuestions, hasAnsweredCurrent, hasCancelled, handleTimeUp]);
+  }, [questionTimer.secondsLeft, roomState, isHost, isPaused, hasCompletedAllQuestions, hasAnsweredCurrent, hasCancelled, isKicked, handleTimeUp]);
 
   // 3. Clean up advance timer on unmount
   useEffect(() => {
@@ -743,6 +1011,37 @@ export const LiveRoom = () => {
 
   // currentQ options are plain strings (server sends string[], not object[])
   const currentQ = questions[currentQIdx];
+
+  if (isKicked) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '580px', margin: '2rem auto', width: '100%', padding: '0 0.75rem', boxSizing: 'border-box' }}>
+        <Card style={{ padding: 'clamp(1.75rem, 4vw, 2.75rem)', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.25rem', backgroundColor: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+          <div style={{ width: '64px', height: '64px', borderRadius: '50%', backgroundColor: 'hsl(0 84% 55% / 0.12)', color: 'hsl(0 84% 55%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <UserX size={34} />
+          </div>
+          <div>
+            <Badge variant="danger" style={{ marginBottom: '0.4rem', backgroundColor: 'hsl(0 84% 55% / 0.15)', color: 'hsl(0 84% 65%)', border: '1px solid hsl(0 84% 55%)' }}>
+              ACCESS RESTRICTED
+            </Badge>
+            <h2 style={{ fontSize: 'clamp(1.3rem, 3.5vw, 1.8rem)', fontWeight: 900, color: 'var(--text)' }}>
+              Unable to Participate
+            </h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.94rem', marginTop: '0.35rem', lineHeight: 1.5 }}>
+              {kickedMessage || 'You have been removed from this live session or the room is currently locked by the host.'}
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center', width: '100%', marginTop: '0.5rem' }}>
+            <Button variant="primary" onClick={() => navigate('/dashboard')} style={{ minWidth: '150px' }}>
+              Dashboard
+            </Button>
+            <Button variant="outline" onClick={() => navigate('/quiz/join')} style={{ minWidth: '150px' }}>
+              Join Another Quiz
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '1080px', margin: '0 auto', width: '100%', padding: '0 0.75rem', boxSizing: 'border-box' }}>
@@ -871,36 +1170,65 @@ export const LiveRoom = () => {
               </span>
             ) : (
               // participants is an array of name strings
-              participants.map((name, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.45rem',
-                    backgroundColor: 'var(--surface)',
-                    border: '1px solid var(--border)',
-                    padding: '0.35rem 0.8rem',
-                    borderRadius: 'var(--radius-pill)',
-                    fontSize: '0.82rem',
-                    fontWeight: 700,
-                    color: 'var(--text)',
-                    maxWidth: '100%',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  <span style={{ fontSize: '1.05rem', lineHeight: 1 }}>{getParticipantAvatar(name)}</span>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
-                </div>
-              ))
+              participants.map((name, idx) => {
+                const detail = participantDetails.find((p) => p.name === name);
+                return (
+                  <div
+                    key={idx}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.45rem',
+                      backgroundColor: 'var(--surface)',
+                      border: '1px solid var(--border)',
+                      padding: '0.35rem 0.75rem',
+                      borderRadius: 'var(--radius-pill)',
+                      fontSize: '0.82rem',
+                      fontWeight: 700,
+                      color: 'var(--text)',
+                      maxWidth: '100%',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <span style={{ fontSize: '1.05rem', lineHeight: 1 }}>{detail?.avatar || getParticipantAvatar(name)}</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+                    {isHost && (
+                      <button
+                        type="button"
+                        onClick={() => handleKickParticipant(name, detail?.socketId)}
+                        title={`Kick / Ban ${name}`}
+                        style={{
+                          background: 'hsl(0 84% 55% / 0.12)',
+                          border: 'none',
+                          color: 'hsl(0 84% 55%)',
+                          width: '20px',
+                          height: '20px',
+                          borderRadius: '50%',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          cursor: 'pointer',
+                          marginLeft: '0.15rem',
+                          padding: 0,
+                          fontSize: '0.7rem',
+                          fontWeight: 900,
+                          flexShrink: 0,
+                        }}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                );
+              })
             )}
           </div>
 
           {/* Host Action to Start */}
           {isHost ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem', width: '100%', maxWidth: '360px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem', width: '100%', maxWidth: '380px' }}>
               <label
                 style={{
                   display: 'inline-flex',
@@ -916,7 +1244,7 @@ export const LiveRoom = () => {
                   color: 'var(--text)',
                   userSelect: 'none',
                   width: '100%',
-                  justifyContent: 'center',
+                  justifyContent: 'flex-start',
                   boxSizing: 'border-box',
                 }}
               >
@@ -944,7 +1272,7 @@ export const LiveRoom = () => {
                   color: 'var(--text)',
                   userSelect: 'none',
                   width: '100%',
-                  justifyContent: 'center',
+                  justifyContent: 'flex-start',
                   boxSizing: 'border-box',
                 }}
               >
@@ -956,6 +1284,54 @@ export const LiveRoom = () => {
                 />
                 <span>⚡ Enable player Power-Ups (50/50, +15s, 2x)</span>
               </label>
+
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '0.5rem',
+                  padding: '0.5rem 0.9rem',
+                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: isRoomLocked ? 'hsl(38 92% 50% / 0.12)' : 'var(--surface)',
+                  border: isRoomLocked ? '1.5px solid hsl(38 92% 50%)' : '1px solid var(--border)',
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  color: 'var(--text)',
+                  width: '100%',
+                  boxSizing: 'border-box',
+                }}
+              >
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.55rem', cursor: 'pointer', userSelect: 'none' }}>
+                  <input
+                    type="checkbox"
+                    checked={lockOnStartLobby}
+                    onChange={(e) => setLockOnStartLobby(e.target.checked)}
+                    style={{ width: '16px', height: '16px', accentColor: 'var(--primary)', cursor: 'pointer' }}
+                  />
+                  <span>🔒 Auto-lock room when quiz starts</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => handleToggleLock(!isRoomLocked)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.25rem',
+                    padding: '0.25rem 0.6rem',
+                    borderRadius: 'var(--radius-pill)',
+                    border: '1px solid var(--border)',
+                    backgroundColor: isRoomLocked ? 'hsl(38 92% 50%)' : 'var(--surface-2)',
+                    color: isRoomLocked ? '#fff' : 'var(--text)',
+                    fontSize: '0.74rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                  title={isRoomLocked ? 'Unlock Lobby Now' : 'Lock Lobby Now'}
+                >
+                  {isRoomLocked ? <><Lock size={12} /> Locked</> : <><Unlock size={12} /> Lock Now</>}
+                </button>
+              </div>
 
               <Button
                 onClick={handleStartQuiz}
@@ -1077,25 +1453,47 @@ export const LiveRoom = () => {
           </Card>
 
           {/* ============================================================
-              HOST VIEW: Question Display, Controls & Live Leaderboard
+              HOST VIEW: Question Display, Controls, Live Distribution & Leaderboard
               ============================================================ */}
           {isHost && (
-            <Card style={{ padding: '1.75rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <Card
+              style={{
+                padding: isProjectorMode ? '2.5rem' : '1.75rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '1.25rem',
+                ...(isProjectorMode
+                  ? {
+                      position: 'fixed',
+                      inset: 0,
+                      zIndex: 9500,
+                      borderRadius: 0,
+                      overflowY: 'auto',
+                      backgroundColor: 'var(--bg)',
+                    }
+                  : {}),
+              }}
+            >
               {/* Header row with timer, counts, and controls */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                   <TimerRing
                     secondsLeft={questionTimer.secondsLeft}
                     totalSeconds={questionTimer.totalSeconds}
-                    size={52}
+                    size={isProjectorMode ? 68 : 52}
                   />
                   <div>
-                    <div style={{ fontSize: '0.7rem', fontWeight: 900, color: 'var(--text-muted)', letterSpacing: '0.07em' }}>
-                      TIME LEFT — Q {currentQIdx + 1} / {questions.length}
+                    <div style={{ fontSize: isProjectorMode ? '0.85rem' : '0.7rem', fontWeight: 900, color: 'var(--text-muted)', letterSpacing: '0.07em', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <span>TIME LEFT — Q {currentQIdx + 1} / {questions.length}</span>
+                      {isPaused && (
+                        <Badge variant="danger" style={{ backgroundColor: 'hsl(38 92% 50%)', color: '#fff', fontSize: '0.68rem', padding: '0.1rem 0.4rem' }}>
+                          PAUSED
+                        </Badge>
+                      )}
                     </div>
                     <div style={{
-                      fontSize: '1.8rem', fontWeight: 900, lineHeight: 1,
-                      color: questionTimer.secondsLeft <= 5 ? 'hsl(0 84% 55%)' : 'var(--text)',
+                      fontSize: isProjectorMode ? '2.4rem' : '1.8rem', fontWeight: 900, lineHeight: 1,
+                      color: isPaused ? 'hsl(38 92% 50%)' : questionTimer.secondsLeft <= 5 ? 'hsl(0 84% 55%)' : 'var(--text)',
                       fontVariantNumeric: 'tabular-nums',
                     }}>
                       {questionTimer.secondsLeft}s
@@ -1103,18 +1501,72 @@ export const LiveRoom = () => {
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', flexWrap: 'wrap' }}>
                   <div
                     style={{
                       display: 'inline-flex', alignItems: 'center', gap: '0.45rem',
-                      padding: '0.45rem 1rem', borderRadius: 'var(--radius-pill)',
+                      padding: '0.42rem 0.9rem', borderRadius: 'var(--radius-pill)',
                       backgroundColor: 'var(--primary-soft)', border: '1.5px solid var(--primary)',
-                      color: 'var(--primary-text)', fontWeight: 800, fontSize: '0.88rem',
+                      color: 'var(--primary-text)', fontWeight: 800, fontSize: '0.85rem',
                     }}
                   >
                     <CheckCircle2 size={14} />
                     {submissionStats.submittedCount} / {submissionStats.totalParticipants} answered
                   </div>
+
+                  {/* Pause / Resume Clock Button */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleTogglePause}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      fontWeight: 800,
+                      borderColor: isPaused ? 'hsl(142 71% 45%)' : 'hsl(38 92% 50%)',
+                      color: isPaused ? 'hsl(142 71% 40%)' : 'hsl(38 92% 45%)',
+                      backgroundColor: isPaused ? 'hsl(142 71% 45% / 0.1)' : 'hsl(38 92% 50% / 0.1)',
+                    }}
+                    title={isPaused ? 'Resume Question Timer' : 'Pause Question Timer'}
+                  >
+                    {isPaused ? <><Play size={14} /> Resume Timer</> : <><Pause size={14} /> Pause Timer</>}
+                  </Button>
+
+                  {/* Lock / Unlock Room Button */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleToggleLock(!isRoomLocked)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      fontWeight: 800,
+                      borderColor: isRoomLocked ? 'hsl(38 92% 50%)' : 'var(--border)',
+                      color: isRoomLocked ? 'hsl(38 92% 45%)' : 'var(--text)',
+                    }}
+                    title={isRoomLocked ? 'Room is locked (Click to unlock)' : 'Lock room to prevent late joins'}
+                  >
+                    {isRoomLocked ? <><Lock size={14} /> Locked</> : <><Unlock size={14} /> Lock Room</>}
+                  </Button>
+
+                  {/* Projector / Presentation Mode Toggle */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleToggleProjectorMode}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      fontWeight: 800,
+                    }}
+                    title={isProjectorMode ? 'Exit Projector Mode' : 'Enter Fullscreen Projector Mode'}
+                  >
+                    {isProjectorMode ? <><Minimize2 size={14} /> Exit Projector</> : <><Maximize2 size={14} /> Projector Mode</>}
+                  </Button>
+
                   {currentQIdx < questions.length - 1 ? (
                     <Button
                       variant="primary"
@@ -1134,71 +1586,133 @@ export const LiveRoom = () => {
                       Finish Quiz 🏆
                     </Button>
                   )}
-                  <div
-                    style={{
-                      display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
-                      padding: '0.45rem 1rem', borderRadius: 'var(--radius-pill)',
-                      backgroundColor: 'var(--surface-2)', border: '1px solid var(--border)',
-                      color: 'var(--text)', fontWeight: 800, fontSize: '0.88rem',
-                    }}
-                  >
-                    <Crown size={14} color="var(--primary)" /> Host View
-                  </div>
                 </div>
               </div>
 
-              {/* Host Active Question Card */}
+              {/* Host Active Question Card + Kahoot-Style Live Option Distribution Bars */}
               <div
                 style={{
-                  padding: '1.25rem',
+                  padding: isProjectorMode ? '2rem' : '1.25rem',
                   borderRadius: 'var(--radius-card)',
                   backgroundColor: 'var(--surface)',
                   border: '1.5px solid var(--border)',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '0.75rem',
+                  gap: isProjectorMode ? '1.25rem' : '0.85rem',
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-                  <Badge variant="primary" style={{ fontSize: '0.75rem', fontWeight: 900 }}>
+                  <Badge variant="primary" style={{ fontSize: isProjectorMode ? '0.92rem' : '0.75rem', fontWeight: 900 }}>
                     QUESTION {currentQIdx + 1} OF {questions.length}
                   </Badge>
-                  <Badge variant="secondary" style={{ fontSize: '0.75rem' }}>
-                    {currentQ?.points || 10} pts
-                  </Badge>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <Badge variant="secondary" style={{ fontSize: isProjectorMode ? '0.9rem' : '0.75rem' }}>
+                      <BarChart2 size={12} style={{ marginRight: '4px' }} /> Live Option Distribution
+                    </Badge>
+                    <Badge variant="secondary" style={{ fontSize: isProjectorMode ? '0.9rem' : '0.75rem' }}>
+                      {currentQ?.points || 10} pts
+                    </Badge>
+                  </div>
                 </div>
 
-                <h2 style={{ fontSize: 'clamp(1.15rem, 2.5vw, 1.45rem)', fontWeight: 800, color: 'var(--text)', margin: '0.25rem 0', lineHeight: 1.4 }}>
+                <h2 style={{ fontSize: isProjectorMode ? 'clamp(1.75rem, 3.8vw, 2.6rem)' : 'clamp(1.15rem, 2.5vw, 1.45rem)', fontWeight: 900, color: 'var(--text)', margin: '0.25rem 0', lineHeight: 1.35 }}>
                   {currentQ?.title || 'Preparing question...'}
                 </h2>
 
-                {/* Question options with correct marked for host */}
+                {/* Question options with Kahoot-Style real-time distribution bars */}
                 {currentQ?.options && (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.6rem', marginTop: '0.25rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: isProjectorMode ? 'repeat(auto-fit, minmax(340px, 1fr))' : 'repeat(auto-fit, minmax(240px, 1fr))', gap: isProjectorMode ? '1rem' : '0.75rem', marginTop: '0.35rem' }}>
                     {currentQ.options.map((optText, optIdx) => {
                       const isCorrect = optIdx === currentQ.correctIndex;
+                      const letter = String.fromCharCode(65 + optIdx);
+                      const qDist = optionDistribution[currentQIdx] || { counts: [], totalResponses: 0 };
+                      const count = qDist.counts?.[optIdx] || 0;
+                      const totalResp = qDist.totalResponses || 0;
+                      const pct = totalResp > 0 ? Math.round((count / totalResp) * 100) : 0;
+                      const barColors = [
+                        'hsl(142 71% 45%)',
+                        'hsl(217 91% 60%)',
+                        'hsl(38 92% 50%)',
+                        'hsl(280 75% 58%)',
+                      ];
+                      const barColor = isCorrect ? 'hsl(142 71% 45%)' : barColors[optIdx % barColors.length];
+
                       return (
                         <div
                           key={optIdx}
                           style={{
-                            padding: '0.7rem 0.9rem',
+                            position: 'relative',
+                            overflow: 'hidden',
+                            padding: isProjectorMode ? '1.15rem 1.35rem' : '0.8rem 1rem',
                             borderRadius: 'var(--radius-btn)',
-                            backgroundColor: isCorrect ? 'hsl(142 71% 45% / 0.12)' : 'var(--surface-2)',
-                            border: isCorrect ? '1.5px solid hsl(142 71% 45%)' : '1px solid var(--border)',
+                            backgroundColor: isCorrect ? 'hsl(142 71% 45% / 0.1)' : 'var(--surface-2)',
+                            border: isCorrect ? '2px solid hsl(142 71% 45%)' : '1.5px solid var(--border)',
                             display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            gap: '0.5rem',
+                            flexDirection: 'column',
+                            gap: '0.45rem',
                           }}
                         >
-                          <span style={{ fontWeight: isCorrect ? 800 : 600, color: isCorrect ? 'hsl(142 71% 35%)' : 'var(--text)', fontSize: '0.88rem' }}>
-                            {optText}
-                          </span>
-                          {isCorrect && (
-                            <Badge variant="primary" style={{ backgroundColor: 'hsl(142 71% 45%)', color: '#fff', fontSize: '0.7rem', padding: '0.1rem 0.45rem' }}>
-                              ✓ Correct
-                            </Badge>
-                          )}
+                          {/* Animated Kahoot-Style Fill Background */}
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              bottom: 0,
+                              width: `${pct}%`,
+                              backgroundColor: isCorrect ? 'hsl(142 71% 45% / 0.18)' : 'hsl(217 91% 60% / 0.12)',
+                              transition: 'width 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+                              pointerEvents: 'none',
+                            }}
+                          />
+
+                          <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', minWidth: 0 }}>
+                              <span
+                                style={{
+                                  width: isProjectorMode ? '34px' : '26px',
+                                  height: isProjectorMode ? '34px' : '26px',
+                                  borderRadius: '50%',
+                                  backgroundColor: barColor,
+                                  color: '#fff',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontWeight: 900,
+                                  fontSize: isProjectorMode ? '0.95rem' : '0.78rem',
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {letter}
+                              </span>
+                              <span style={{ fontWeight: isCorrect ? 800 : 700, color: 'var(--text)', fontSize: isProjectorMode ? '1.2rem' : '0.92rem', wordBreak: 'break-word' }}>
+                                {optText}
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexShrink: 0 }}>
+                              <span style={{ fontWeight: 900, fontSize: isProjectorMode ? '1.05rem' : '0.82rem', color: 'var(--text)' }}>
+                                {count} ({pct}%)
+                              </span>
+                              {isCorrect && (
+                                <Badge variant="primary" style={{ backgroundColor: 'hsl(142 71% 45%)', color: '#fff', fontSize: '0.68rem', padding: '0.1rem 0.45rem' }}>
+                                  ✓ Correct
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Progress bar track */}
+                          <div style={{ position: 'relative', zIndex: 1, width: '100%', height: isProjectorMode ? '8px' : '6px', backgroundColor: 'var(--surface)', borderRadius: '999px', overflow: 'hidden' }}>
+                            <div
+                              style={{
+                                width: `${pct}%`,
+                                height: '100%',
+                                backgroundColor: barColor,
+                                borderRadius: '999px',
+                                transition: 'width 0.35s ease',
+                              }}
+                            />
+                          </div>
                         </div>
                       );
                     })}
@@ -1301,12 +1815,38 @@ export const LiveRoom = () => {
                             </span>
                           ) : null}
                         </div>
-                        <span style={{
-                          fontWeight: 900, color: isCancelled ? 'hsl(0 84% 65%)' : 'var(--primary-text)',
-                          fontVariantNumeric: 'tabular-nums', fontSize: '1rem',
-                        }}>
-                          {entry.score} pts
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                          <span style={{
+                            fontWeight: 900, color: isCancelled ? 'hsl(0 84% 65%)' : 'var(--primary-text)',
+                            fontVariantNumeric: 'tabular-nums', fontSize: '1rem',
+                          }}>
+                            {entry.score} pts
+                          </span>
+                          {!isCancelled && (
+                            <button
+                              type="button"
+                              onClick={() => handleKickParticipant(entry.name, entry.socketId)}
+                              title={`Kick / Ban ${entry.name}`}
+                              style={{
+                                background: 'hsl(0 84% 55% / 0.12)',
+                                border: '1px solid hsl(0 84% 55% / 0.35)',
+                                color: 'hsl(0 84% 55%)',
+                                width: '24px',
+                                height: '24px',
+                                borderRadius: '50%',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                fontSize: '0.75rem',
+                                fontWeight: 900,
+                                padding: 0,
+                              }}
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
                       </div>
                     );
                   })
@@ -1581,8 +2121,13 @@ export const LiveRoom = () => {
                     size={58}
                   />
                   <div>
-                    <div style={{ fontSize: '0.68rem', fontWeight: 900, color: 'var(--text-muted)', letterSpacing: '0.08em' }}>
-                      TIME REMAINING
+                    <div style={{ fontSize: '0.68rem', fontWeight: 900, color: 'var(--text-muted)', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <span>TIME REMAINING</span>
+                      {isPaused && (
+                        <Badge variant="danger" style={{ backgroundColor: 'hsl(38 92% 50%)', color: '#fff', fontSize: '0.65rem', padding: '0.08rem 0.38rem' }}>
+                          PAUSED BY HOST
+                        </Badge>
+                      )}
                     </div>
                     <div
                       style={{
@@ -1942,6 +2487,24 @@ export const LiveRoom = () => {
           </div>
 
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center', marginTop: '1rem' }}>
+            {isHost && leaderboard.length > 0 && (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={handleExportCSV}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', fontWeight: 800 }}
+                >
+                  <Download size={16} /> 📊 Export CSV Scorecard
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleExportPDF}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', fontWeight: 800 }}
+                >
+                  <FileText size={16} /> 📄 Export PDF Report
+                </Button>
+              </>
+            )}
             {reviewHistory.length > 0 && (
               <Button
                 variant="outline"

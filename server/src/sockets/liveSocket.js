@@ -29,9 +29,76 @@ class LiveSessionManager {
 
   getOrCreateTimerState(code) {
     if (!this.roomTimers.has(code)) {
-      this.roomTimers.set(code, { timerInterval: null, advanceTimeout: null });
+      this.roomTimers.set(code, { timerInterval: null, advanceTimeout: null, secondsLeft: 30, totalSeconds: 30 });
     }
     return this.roomTimers.get(code);
+  }
+
+  // Helper: Format final leaderboard including detailed per-question breakdown for CSV/PDF Export
+  buildFinalLeaderboard(room) {
+    const totalPointsPossible = (room.questions || []).reduce((acc, q) => acc + (q.points || 10), 0) || 10;
+    const passingPercent = room.passingScorePercent || 60;
+    return Array.from((room.participants || new Map()).values())
+      .sort((a, b) => (b.score || 0) - (a.score || 0))
+      .map((p) => {
+        const score = p.score || 0;
+        const pct = p.percentage !== undefined ? p.percentage : (totalPointsPossible > 0 ? Math.round((score / totalPointsPossible) * 100) : 0);
+        const passed = p.passed !== undefined ? p.passed : (pct >= passingPercent && p.status !== 'cancelled');
+        return {
+          socketId: p.socketId || null,
+          name: p.name,
+          avatar: p.avatar || '🦊',
+          score,
+          totalPointsPossible,
+          streak: p.streak || 0,
+          percentage: pct,
+          passed,
+          attemptId: p.savedAttemptId || null,
+          answersCount: (p.answers || []).length,
+          status: p.status || 'active',
+          answers: (p.answers || []).map((a) => ({
+            questionId: String(a.questionId?._id || a.questionId?.id || a.questionId || ''),
+            selectedText: a.selectedText || '',
+            isCorrect: Boolean(a.isCorrect),
+            pointsAwarded: a.pointsAwarded || 0,
+          })),
+        };
+      });
+  }
+
+  // Helper: Compute Kahoot-style option distribution across all questions for Host View
+  computeOptionDistribution(room) {
+    const dist = {};
+    const participants = Array.from((room.participants || new Map()).values());
+    (room.questions || []).forEach((q, qIdx) => {
+      const qId = String(q._id || q.id || '');
+      const rawOpts = (q.options || []).map((o) => (typeof o === 'string' ? o : o.text));
+      const counts = rawOpts.map(() => 0);
+      let totalResponses = 0;
+
+      participants.forEach((p) => {
+        const ans = (p.answers || []).find((a) => {
+          const aId = String(a.questionId?._id || a.questionId?.id || a.questionId || '');
+          return aId && qId && aId === qId;
+        }) || (p.answers && p.answers[qIdx]);
+
+        if (ans && ans.selectedText) {
+          const matchIdx = rawOpts.findIndex(
+            (optText) => String(optText || '').trim().toLowerCase() === String(ans.selectedText || '').trim().toLowerCase()
+          );
+          if (matchIdx >= 0) {
+            counts[matchIdx] += 1;
+            totalResponses += 1;
+          }
+        }
+      });
+
+      dist[qIdx] = {
+        counts,
+        totalResponses,
+      };
+    });
+    return dist;
   }
 
   // Helper: Persist participant quiz attempt into database on finish
@@ -172,6 +239,10 @@ class LiveSessionManager {
           settings: quizDoc?.settings || null,
           passingScorePercent: quizDoc?.settings?.passingScorePercent || 60,
           participants: existingParticipants,
+          bannedUsers: existingRoom?.bannedUsers || [],
+           bannedNames: existingRoom?.bannedNames || [],
+          isLocked: Boolean(existingRoom?.isLocked),
+          isPaused: Boolean(existingRoom?.isPaused),
           startedAt: existingRoom ? existingRoom.startedAt : null,
           timerInterval: null,
           advanceTimeout: null,
@@ -184,6 +255,8 @@ class LiveSessionManager {
 
         const participantList = Array.from(existingParticipants.values()).map((p) => p.name);
         const participantDetails = Array.from(existingParticipants.values()).map((p) => ({
+          socketId: p.socketId,
+          userId: p.userId || null,
           name: p.name,
           avatar: p.avatar || '🦊',
         }));
@@ -192,6 +265,7 @@ class LiveSessionManager {
           participantDetails,
           count: participantList.length,
           status: roomObj.status,
+          isLocked: roomObj.isLocked,
         });
 
         console.log(`[Live Session] Host initialized room: ${code} with ${questions.length} questions. Participants: ${participantList.length}`);
@@ -241,6 +315,10 @@ class LiveSessionManager {
             settings: quizDoc?.settings || null,
             passingScorePercent: quizDoc?.settings?.passingScorePercent || 60,
             participants: new Map(),
+            bannedUsers: [],
+            bannedNames: [],
+            isLocked: false,
+            isPaused: false,
             startedAt: null,
             timerInterval: null,
             advanceTimeout: null,
@@ -253,14 +331,26 @@ class LiveSessionManager {
         if (room.status === 'ended') {
           socket.emit('room:ended-lock', {
             message: 'This live quiz session has ended and cannot be restarted.',
-            leaderboard: Array.from(room.participants.values()).sort((a, b) => b.score - a.score),
+            leaderboard: this.buildFinalLeaderboard(room),
           });
           return;
         }
 
         const effectiveName = participantName || `Player_${Math.floor(Math.random() * 900 + 100)}`;
+
+        // Check if participant was kicked / banned by the host
+        const isBannedUser = userId && (room.bannedUsers || []).includes(String(userId));
+        const isBannedName = (room.bannedNames || []).includes(effectiveName.trim().toLowerCase());
+        if (isBannedUser || isBannedName) {
+          socket.emit('participant:kicked', {
+            message: 'You have been removed from this live session by the host.',
+          });
+          return;
+        }
+
         let existingScore = 0;
         let existingAnswers = [];
+        let isExistingParticipant = false;
 
         // Replace previous socket connection for the same user or name so stale sockets don't accumulate
         for (const [existingSocketId, p] of room.participants.entries()) {
@@ -268,11 +358,22 @@ class LiveSessionManager {
             const isSameUser = userId && p.userId && String(p.userId) === String(userId);
             const isSameName = !userId && p.name && p.name === effectiveName;
             if (isSameUser || isSameName) {
+              isExistingParticipant = true;
               existingScore = p.score || 0;
               existingAnswers = p.answers || [];
               room.participants.delete(existingSocketId);
             }
+          } else {
+            isExistingParticipant = true;
           }
+        }
+
+        // Check if lobby/room is locked for new participants
+        if (room.isLocked && !isExistingParticipant) {
+          socket.emit('room:locked-reject', {
+            message: '🔒 This room is locked by the host and is no longer accepting new participants.',
+          });
+          return;
         }
 
         room.participants.set(socket.id, {
@@ -290,6 +391,8 @@ class LiveSessionManager {
 
         const participantList = Array.from(room.participants.values()).map((p) => p.name);
         const participantDetails = Array.from(room.participants.values()).map((p) => ({
+          socketId: p.socketId,
+          userId: p.userId || null,
           name: p.name,
           avatar: p.avatar || '🦊',
         }));
@@ -298,6 +401,7 @@ class LiveSessionManager {
           participantDetails,
           count: participantList.length,
           status: room.status,
+          isLocked: Boolean(room.isLocked),
         });
 
         if (room.status === 'active' && room.questions && room.questions.length > 0) {
@@ -394,32 +498,23 @@ class LiveSessionManager {
 
         if (room.currentQuestionIdx < room.questions.length - 1) {
           room.currentQuestionIdx += 1;
+          room.isPaused = false;
           await liveRoomStore.set(code, room);
           const nextLimit = getQuestionTimeLimit(room, room.currentQuestionIdx);
           io.to(code).emit('question:advanced', {
             questionIdx: room.currentQuestionIdx,
             totalSeconds: nextLimit,
             autoAdvanced: true,
+            isPaused: false,
           });
           startQuestionTimer(code);
         } else {
           room.status = 'ended';
+          room.isPaused = false;
           this.clearRoomTimers(code);
           await this.saveFinalAttempts(room);
           await liveRoomStore.set(code, room);
-          const finalLeaderboard = Array.from(room.participants.values())
-            .sort((a, b) => b.score - a.score)
-            .map((p) => ({
-              name: p.name,
-              avatar: p.avatar || '🦊',
-              score: p.score,
-              streak: p.streak || 0,
-              percentage: p.percentage || 0,
-              passed: p.passed || false,
-              attemptId: p.savedAttemptId || null,
-              answersCount: (p.answers || []).length,
-              status: p.status || 'active',
-            }));
+          const finalLeaderboard = this.buildFinalLeaderboard(room);
 
           io.to(code).emit('quiz:ended', {
             leaderboard: finalLeaderboard,
@@ -429,28 +524,39 @@ class LiveSessionManager {
       };
 
       // Helper to start per-question server timer
-      const startQuestionTimer = async (code) => {
+      const startQuestionTimer = async (code, resumeSecondsLeft = null) => {
         const room = await liveRoomStore.get(code) || this.rooms.get(code);
         if (!room || room.status !== 'active') return;
 
         this.clearRoomTimers(code);
 
         const totalSeconds = getQuestionTimeLimit(room, room.currentQuestionIdx);
-        let secondsLeft = totalSeconds;
+        let secondsLeft = resumeSecondsLeft !== null ? resumeSecondsLeft : totalSeconds;
+
+        const timerState = this.getOrCreateTimerState(code);
+        timerState.secondsLeft = secondsLeft;
+        timerState.totalSeconds = totalSeconds;
 
         io.to(code).emit('question:timer-tick', {
           questionIdx: room.currentQuestionIdx,
           secondsLeft,
           totalSeconds,
+          isPaused: Boolean(room.isPaused),
         });
 
-        const timerState = this.getOrCreateTimerState(code);
+        if (room.isPaused) return;
+
         timerState.timerInterval = setInterval(async () => {
+          const currentRoom = this.rooms.get(code);
+          if (currentRoom && currentRoom.isPaused) return;
+
           secondsLeft -= 1;
+          timerState.secondsLeft = Math.max(0, secondsLeft);
           io.to(code).emit('question:timer-tick', {
             questionIdx: room.currentQuestionIdx,
             secondsLeft: Math.max(0, secondsLeft),
             totalSeconds,
+            isPaused: false,
           });
 
           if (secondsLeft <= 0) {
@@ -470,7 +576,7 @@ class LiveSessionManager {
       };
 
       // 3. Host starts quiz (Blocked if quiz has ended)
-      socket.on('host:start-quiz', async ({ roomCode, shuffleQuestions, enablePowerUps }) => {
+      socket.on('host:start-quiz', async ({ roomCode, shuffleQuestions, enablePowerUps, lockOnStart }) => {
         const code = roomCode.toUpperCase();
         const room = await liveRoomStore.get(code) || this.rooms.get(code);
         if (room) {
@@ -497,6 +603,10 @@ class LiveSessionManager {
           room.startedAt = new Date();
           room.currentQuestionIdx = 0;
           room.enablePowerUps = powerUpsAllowed;
+          room.isPaused = false;
+          if (lockOnStart !== undefined) {
+            room.isLocked = Boolean(lockOnStart);
+          }
           await liveRoomStore.set(code, room);
 
           // 1. Host receives standard question order for public projection/review
@@ -505,6 +615,8 @@ class LiveSessionManager {
             questions: buildSanitizedQuestions(room, room.questions, false),
             title: room.quizTitle,
             enablePowerUps: powerUpsAllowed,
+            isLocked: Boolean(room.isLocked),
+            isPaused: false,
           });
 
           // 2. Each participant receives their OWN personalized question shuffle AND option shuffle!
@@ -616,6 +728,7 @@ class LiveSessionManager {
           const liveLeaderboard = Array.from(room.participants.values())
             .sort((a, b) => b.score - a.score)
             .map((p) => ({
+              socketId: p.socketId,
               name: p.name,
               avatar: p.avatar || '🦊',
               score: p.score,
@@ -634,10 +747,13 @@ class LiveSessionManager {
             ([, p]) => (p.answers || []).length > room.currentQuestionIdx
           ).length;
 
+          const optionDistribution = this.computeOptionDistribution(room);
+
           io.to(code).emit('leaderboard:updated', {
             leaderboard: liveLeaderboard,
             totalParticipants: totalActive || room.participants.size,
             submittedCount: answeredCount,
+            optionDistribution,
           });
 
           // Send confirmation feedback back to participant
@@ -659,19 +775,7 @@ class LiveSessionManager {
             await this.saveFinalAttempts(room);
             await liveRoomStore.set(code, room);
 
-            const finalLeaderboard = Array.from(room.participants.values())
-              .sort((a, b) => b.score - a.score)
-              .map((p) => ({
-                name: p.name,
-                avatar: p.avatar || '🦊',
-                score: p.score,
-                streak: p.streak || 0,
-                percentage: p.percentage || 0,
-                passed: p.passed || false,
-                attemptId: p.savedAttemptId || null,
-                answersCount: (p.answers || []).length,
-                status: p.status || 'active',
-              }));
+            const finalLeaderboard = this.buildFinalLeaderboard(room);
 
             io.to(code).emit('quiz:ended', {
               leaderboard: finalLeaderboard,
@@ -701,19 +805,7 @@ class LiveSessionManager {
             await this.saveFinalAttempts(room);
             await liveRoomStore.set(code, room);
 
-            const finalLeaderboard = Array.from(room.participants.values())
-              .sort((a, b) => b.score - a.score)
-              .map((p) => ({
-                name: p.name,
-                avatar: p.avatar || '🦊',
-                score: p.score,
-                streak: p.streak || 0,
-                percentage: p.percentage || 0,
-                passed: p.passed || false,
-                attemptId: p.savedAttemptId || null,
-                answersCount: (p.answers || []).length,
-                status: p.status || 'active',
-              }));
+            const finalLeaderboard = this.buildFinalLeaderboard(room);
 
             io.to(code).emit('quiz:ended', {
               leaderboard: finalLeaderboard,
@@ -856,8 +948,133 @@ class LiveSessionManager {
         const code = roomCode.toUpperCase();
         const room = await liveRoomStore.get(code) || this.rooms.get(code);
         if (room && room.status === 'active') {
+          room.isPaused = false;
           this.clearRoomTimers(code);
           await advanceToNextOrEnd(code);
+        }
+      });
+
+      // 5b. Host toggles room lock (prevent latecomers from joining)
+      socket.on('host:toggle-lock', async ({ roomCode, isLocked }) => {
+        const code = roomCode.toUpperCase();
+        const room = await liveRoomStore.get(code) || this.rooms.get(code);
+        if (room) {
+          room.isLocked = isLocked !== undefined ? Boolean(isLocked) : !room.isLocked;
+          await liveRoomStore.set(code, room);
+          io.to(code).emit('room:lock-updated', {
+            isLocked: room.isLocked,
+          });
+        }
+      });
+
+      // 5c. Host pauses or resumes the countdown timer
+      socket.on('host:toggle-pause', async ({ roomCode }) => {
+        const code = roomCode.toUpperCase();
+        const room = await liveRoomStore.get(code) || this.rooms.get(code);
+        if (room && room.status === 'active') {
+          room.isPaused = !room.isPaused;
+          const timerState = this.getOrCreateTimerState(code);
+          const remaining = timerState.secondsLeft || getQuestionTimeLimit(room, room.currentQuestionIdx);
+
+          if (room.isPaused) {
+            this.clearRoomTimers(code);
+            timerState.secondsLeft = remaining;
+          } else {
+            startQuestionTimer(code, remaining);
+          }
+
+          await liveRoomStore.set(code, room);
+          io.to(code).emit('room:pause-updated', {
+            isPaused: room.isPaused,
+            secondsLeft: remaining,
+          });
+        }
+      });
+
+      // 5d. Host kicks / bans a participant from lobby or active game
+      socket.on('host:kick-participant', async ({ roomCode, targetSocketId, targetName }) => {
+        const code = roomCode.toUpperCase();
+        const room = await liveRoomStore.get(code) || this.rooms.get(code);
+        if (!room) return;
+
+        let foundSocketId = targetSocketId;
+        let foundParticipant = targetSocketId ? room.participants.get(targetSocketId) : null;
+
+        if (!foundParticipant && targetName) {
+          for (const [sId, p] of room.participants.entries()) {
+            if (p.name === targetName) {
+              foundSocketId = sId;
+              foundParticipant = p;
+              break;
+            }
+          }
+        }
+
+        if (foundParticipant && foundSocketId) {
+          room.bannedNames = room.bannedNames || [];
+          room.bannedUsers = room.bannedUsers || [];
+          if (foundParticipant.name) {
+            room.bannedNames.push(foundParticipant.name.trim().toLowerCase());
+          }
+          if (foundParticipant.userId) {
+            room.bannedUsers.push(String(foundParticipant.userId));
+          }
+
+          room.participants.delete(foundSocketId);
+          await liveRoomStore.set(code, room);
+
+          // Notify and remove kicked socket from room
+          const targetSocket = io.sockets.sockets.get(foundSocketId);
+          if (targetSocket) {
+            targetSocket.emit('participant:kicked', {
+              message: '🚫 You were removed from this live quiz by the host.',
+            });
+            targetSocket.leave(code);
+          }
+
+          const participantList = Array.from(room.participants.values()).map((p) => p.name);
+          const participantDetails = Array.from(room.participants.values()).map((p) => ({
+            socketId: p.socketId,
+            userId: p.userId || null,
+            name: p.name,
+            avatar: p.avatar || '🦊',
+          }));
+
+          io.to(code).emit('lobby:updated', {
+            participants: participantList,
+            participantDetails,
+            count: participantList.length,
+            status: room.status,
+            isLocked: Boolean(room.isLocked),
+          });
+
+          const liveLeaderboard = Array.from(room.participants.values())
+            .sort((a, b) => b.score - a.score)
+            .map((p) => ({
+              socketId: p.socketId,
+              name: p.name,
+              avatar: p.avatar || '🦊',
+              score: p.score,
+              streak: p.streak || 0,
+              answersCount: (p.answers || []).length,
+              lastAnsweredQIdx: p.lastAnsweredQIdx,
+              status: p.status || 'active',
+            }));
+
+          const roomSockets = io.sockets.adapter.rooms.get(code) || new Set();
+          const activeParticipants = Array.from(room.participants.entries())
+            .filter(([sockId, p]) => roomSockets.has(sockId) && p.status !== 'cancelled');
+
+          const answeredCount = activeParticipants.filter(
+            ([, p]) => (p.answers || []).length > room.currentQuestionIdx
+          ).length;
+
+          io.to(code).emit('leaderboard:updated', {
+            leaderboard: liveLeaderboard,
+            totalParticipants: activeParticipants.length,
+            submittedCount: answeredCount,
+            optionDistribution: this.computeOptionDistribution(room),
+          });
         }
       });
 
@@ -868,22 +1085,11 @@ class LiveSessionManager {
         if (room) {
           this.clearRoomTimers(code);
           room.status = 'ended';
+          room.isPaused = false;
           await this.saveFinalAttempts(room);
           await liveRoomStore.set(code, room);
 
-          const finalLeaderboard = Array.from(room.participants.values())
-            .sort((a, b) => b.score - a.score)
-            .map((p) => ({
-              name: p.name,
-              avatar: p.avatar || '🦊',
-              score: p.score,
-              streak: p.streak || 0,
-              percentage: p.percentage || 0,
-              passed: p.passed || false,
-              attemptId: p.savedAttemptId || null,
-              answersCount: (p.answers || []).length,
-              status: p.status || 'active',
-            }));
+          const finalLeaderboard = this.buildFinalLeaderboard(room);
 
           io.to(code).emit('quiz:ended', {
             leaderboard: finalLeaderboard,
