@@ -72,15 +72,20 @@ class LiveSessionManager {
     const participants = Array.from((room.participants || new Map()).values());
     (room.questions || []).forEach((q, qIdx) => {
       const qId = String(q._id || q.id || '');
+      const qTitle = String(q.title || '').trim().toLowerCase();
       const rawOpts = (q.options || []).map((o) => (typeof o === 'string' ? o : o.text));
       const counts = rawOpts.map(() => 0);
       let totalResponses = 0;
+      let correctResponses = 0;
 
       participants.forEach((p) => {
+        // Match by questionId first, then by questionTitle, and only fall back to index if question order was not shuffled
         const ans = (p.answers || []).find((a) => {
           const aId = String(a.questionId?._id || a.questionId?.id || a.questionId || '');
-          return aId && qId && aId === qId;
-        }) || (p.answers && p.answers[qIdx]);
+          if (aId && qId && aId === qId) return true;
+          if (a.questionTitle && qTitle && String(a.questionTitle).trim().toLowerCase() === qTitle) return true;
+          return false;
+        });
 
         if (ans && ans.selectedText) {
           const matchIdx = rawOpts.findIndex(
@@ -89,14 +94,22 @@ class LiveSessionManager {
           if (matchIdx >= 0) {
             counts[matchIdx] += 1;
             totalResponses += 1;
+            if (ans.isCorrect) correctResponses += 1;
           }
         }
       });
 
-      dist[qIdx] = {
+      const entry = {
+        questionIdx: qIdx,
+        questionId: qId,
         counts,
         totalResponses,
+        correctResponses,
       };
+      dist[qIdx] = entry;
+      if (qId) {
+        dist[qId] = entry;
+      }
     });
     return dist;
   }
@@ -610,6 +623,7 @@ class LiveSessionManager {
           await liveRoomStore.set(code, room);
 
           // 1. Host receives standard question order for public projection/review
+          const initialDistribution = this.computeOptionDistribution(room);
           socket.emit('quiz:started', {
             questionIdx: 0,
             questions: buildSanitizedQuestions(room, room.questions, false),
@@ -617,6 +631,7 @@ class LiveSessionManager {
             enablePowerUps: powerUpsAllowed,
             isLocked: Boolean(room.isLocked),
             isPaused: false,
+            optionDistribution: initialDistribution,
           });
 
           // 2. Each participant receives their OWN personalized question shuffle AND option shuffle!
@@ -695,6 +710,7 @@ class LiveSessionManager {
             String(q._id || q.id) === String(questionId)
           ) || (room.questions && room.questions[targetQIdx]) || room.questions[0];
 
+          const canonicalQId = String(currentQ?._id || currentQ?.id || questionId || '');
           const matchedOpt = (currentQ?.options || []).find((o) => {
             const text = typeof o === 'string' ? o : o.text;
             return text?.trim().toLowerCase() === String(selectedOptionText || '').trim().toLowerCase();
@@ -715,13 +731,23 @@ class LiveSessionManager {
             participant.streak = 0;
           }
 
-          participant.answers.push({
-            questionId: currentQ?._id || currentQ?.id || null,
+          // Replace existing answer for the same questionId if present, otherwise push
+          const existingAnsIdx = (participant.answers || []).findIndex(
+            (a) => canonicalQId && String(a.questionId?._id || a.questionId?.id || a.questionId || '') === canonicalQId
+          );
+          const answerPayload = {
+            questionId: currentQ?._id || currentQ?.id || questionId || null,
+            questionTitle: currentQ?.title || '',
             selectedText: selectedOptionText || '',
             isCorrect: Boolean(actualCorrect),
             pointsAwarded: pts,
             timeSpentSeconds: 5,
-          });
+          };
+          if (existingAnsIdx >= 0) {
+            participant.answers[existingAnsIdx] = answerPayload;
+          } else {
+            participant.answers.push(answerPayload);
+          }
           await liveRoomStore.set(code, room);
 
           // Build live updated leaderboard
@@ -743,11 +769,11 @@ class LiveSessionManager {
             .filter(([sockId, p]) => roomSockets.has(sockId) && p.status !== 'cancelled');
           const totalActive = activeParticipants.length;
 
-          const answeredCount = activeParticipants.filter(
-            ([, p]) => (p.answers || []).length > room.currentQuestionIdx
-          ).length;
-
           const optionDistribution = this.computeOptionDistribution(room);
+          const currentQDist = optionDistribution[room.currentQuestionIdx];
+          const answeredCount = currentQDist
+            ? currentQDist.totalResponses
+            : activeParticipants.filter(([, p]) => (p.answers || []).length > room.currentQuestionIdx).length;
 
           io.to(code).emit('leaderboard:updated', {
             leaderboard: liveLeaderboard,
