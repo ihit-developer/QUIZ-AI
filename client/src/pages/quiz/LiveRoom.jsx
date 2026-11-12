@@ -101,7 +101,9 @@ export const LiveRoom = () => {
   const [lockOnStartLobby, setLockOnStartLobby] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [optionDistribution, setOptionDistribution] = useState({});
-  const [hostInspectQIdx, setHostInspectQIdx] = useState(null);
+  const [hostInspectQIdx, setHostInspectQIdx] = useState('all'); // 'all' | 'live' | 'timer' | number
+  const [lastActiveQIdx, setLastActiveQIdx] = useState(0);
+  const [lastAnswererName, setLastAnswererName] = useState('');
   const [isProjectorMode, setIsProjectorMode] = useState(false);
   const [isKicked, setIsKicked] = useState(false);
   const [kickedMessage, setKickedMessage] = useState('');
@@ -311,6 +313,12 @@ export const LiveRoom = () => {
       setLeaderboard(data.leaderboard || []);
       if (data.optionDistribution) {
         setOptionDistribution(data.optionDistribution);
+      }
+      if (data.lastAnsweredQuestionIdx !== undefined && data.lastAnsweredQuestionIdx !== null) {
+        setLastActiveQIdx(Number(data.lastAnsweredQuestionIdx) || 0);
+      }
+      if (data.lastAnswererName) {
+        setLastAnswererName(data.lastAnswererName);
       }
       if (data.submittedCount !== undefined) {
         setSubmissionStats({
@@ -1593,17 +1601,24 @@ export const LiveRoom = () => {
 
               {/* Host Active Question Card + Kahoot-Style Live Option Distribution Bars */}
               {(() => {
-                const activeHostQIdx = hostInspectQIdx !== null && questions[hostInspectQIdx] ? hostInspectQIdx : currentQIdx;
-                const inspectedQ = questions[activeHostQIdx] || currentQ;
-                const qDist = optionDistribution[inspectedQ?.id] || optionDistribution[activeHostQIdx] || { counts: [], totalResponses: 0, correctResponses: 0 };
-                const totalResp = qDist.totalResponses || 0;
-                const maxCount = Math.max(1, ...(qDist.counts || [1]));
                 const barColors = [
                   '#E11D48', // Kahoot Red / Rose
                   '#2563EB', // Kahoot Blue
                   '#D97706', // Kahoot Gold / Amber
                   '#059669', // Kahoot Green / Emerald
                 ];
+
+                const isAllOverview = hostInspectQIdx === 'all' && !isProjectorMode && questions.length > 1;
+                const activeHostQIdx =
+                  typeof hostInspectQIdx === 'number' && questions[hostInspectQIdx]
+                    ? hostInspectQIdx
+                    : hostInspectQIdx === 'live' && questions[lastActiveQIdx]
+                    ? lastActiveQIdx
+                    : currentQIdx;
+                const inspectedQ = questions[activeHostQIdx] || currentQ;
+                const qDist = optionDistribution[inspectedQ?.id] || optionDistribution[activeHostQIdx] || { counts: [], totalResponses: 0, correctResponses: 0 };
+                const totalResp = qDist.totalResponses || 0;
+                const maxCount = Math.max(1, ...(qDist.counts || [1]));
 
                 return (
                   <div
@@ -1617,33 +1632,77 @@ export const LiveRoom = () => {
                       gap: isProjectorMode ? '1.35rem' : '1rem',
                     }}
                   >
-                    {/* Question switcher pills so host can inspect live distribution on ANY question at any time */}
+                    {/* Host Mode Switcher Bar: All Questions Matrix (Best for Shuffled Multi-Player), Auto-Follow Latest Answer, or Single Question */}
                     {questions.length > 1 && (
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', paddingBottom: '0.65rem', borderBottom: '1px solid var(--border)' }}>
-                        <span style={{ fontSize: '0.74rem', fontWeight: 900, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                          📊 Inspect Question Distribution:
-                        </span>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.55rem', paddingBottom: '0.75rem', borderBottom: '1px solid var(--border)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '0.74rem', fontWeight: 900, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                            📊 Host Distribution View:
+                          </span>
+                          {lastAnswererName && (
+                            <Badge variant="secondary" style={{ fontSize: '0.7rem' }}>
+                              ⚡ Latest: {lastAnswererName} answered Q{lastActiveQIdx + 1}
+                            </Badge>
+                          )}
+                        </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
                           <button
                             type="button"
-                            onClick={() => setHostInspectQIdx(null)}
+                            onClick={() => setHostInspectQIdx('all')}
                             style={{
-                              padding: '0.28rem 0.65rem',
+                              padding: '0.3rem 0.7rem',
                               borderRadius: 'var(--radius-pill)',
                               fontSize: '0.74rem',
                               fontWeight: 800,
-                              border: hostInspectQIdx === null ? '1.5px solid var(--primary)' : '1px solid var(--border)',
-                              backgroundColor: hostInspectQIdx === null ? 'var(--primary-soft)' : 'var(--surface-2)',
-                              color: hostInspectQIdx === null ? 'var(--primary-text)' : 'var(--text-muted)',
+                              border: hostInspectQIdx === 'all' ? '1.5px solid var(--primary)' : '1px solid var(--border)',
+                              backgroundColor: hostInspectQIdx === 'all' ? 'var(--primary)' : 'var(--surface-2)',
+                              color: hostInspectQIdx === 'all' ? '#fff' : 'var(--text)',
+                              cursor: 'pointer',
+                            }}
+                            title="Show live Kahoot distribution bars for ALL questions simultaneously (Ideal when questions are shuffled per player)"
+                          >
+                            🌐 All Questions Live ({questions.length})
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setHostInspectQIdx('live')}
+                            style={{
+                              padding: '0.3rem 0.7rem',
+                              borderRadius: 'var(--radius-pill)',
+                              fontSize: '0.74rem',
+                              fontWeight: 800,
+                              border: hostInspectQIdx === 'live' ? '1.5px solid var(--primary)' : '1px solid var(--border)',
+                              backgroundColor: hostInspectQIdx === 'live' ? 'var(--primary)' : 'var(--surface-2)',
+                              color: hostInspectQIdx === 'live' ? '#fff' : 'var(--text)',
+                              cursor: 'pointer',
+                            }}
+                            title="Automatically jump to whichever question was most recently answered by any player"
+                          >
+                            ⚡ Auto-Follow Submissions (Q{lastActiveQIdx + 1})
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setHostInspectQIdx('timer')}
+                            style={{
+                              padding: '0.3rem 0.7rem',
+                              borderRadius: 'var(--radius-pill)',
+                              fontSize: '0.74rem',
+                              fontWeight: 800,
+                              border: hostInspectQIdx === 'timer' ? '1.5px solid var(--primary)' : '1px solid var(--border)',
+                              backgroundColor: hostInspectQIdx === 'timer' ? 'var(--primary)' : 'var(--surface-2)',
+                              color: hostInspectQIdx === 'timer' ? '#fff' : 'var(--text)',
                               cursor: 'pointer',
                             }}
                           >
-                            Follow Timer (Q{currentQIdx + 1})
+                            ⏱️ Room Clock (Q{currentQIdx + 1})
                           </button>
+
                           {questions.map((qItem, idx) => {
                             const itemDist = optionDistribution[qItem.id] || optionDistribution[idx];
                             const itemResp = itemDist?.totalResponses || 0;
-                            const isSelected = activeHostQIdx === idx && hostInspectQIdx !== null;
+                            const isSelected = hostInspectQIdx === idx;
                             return (
                               <button
                                 key={qItem.id || idx}
@@ -1662,7 +1721,7 @@ export const LiveRoom = () => {
                                   alignItems: 'center',
                                   gap: '0.25rem',
                                 }}
-                                title={`View live distribution for Question ${idx + 1} (${itemResp} responses)`}
+                                title={`Focus on Question ${idx + 1} (${itemResp} responses)`}
                               >
                                 <span>Q{idx + 1}</span>
                                 {itemResp > 0 && (
@@ -1675,221 +1734,381 @@ export const LiveRoom = () => {
                       </div>
                     )}
 
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                        <Badge variant="primary" style={{ fontSize: isProjectorMode ? '0.92rem' : '0.75rem', fontWeight: 900 }}>
-                          QUESTION {activeHostQIdx + 1} OF {questions.length}
-                        </Badge>
-                        <Badge variant="secondary" style={{ fontSize: isProjectorMode ? '0.9rem' : '0.75rem' }}>
-                          {inspectedQ?.points || 10} pts
-                        </Badge>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <Badge variant="primary" style={{ fontSize: isProjectorMode ? '0.9rem' : '0.75rem' }}>
-                          <BarChart2 size={12} style={{ marginRight: '4px' }} /> {totalResp} Response{totalResp !== 1 ? 's' : ''} on Q{activeHostQIdx + 1}
-                        </Badge>
-                      </div>
-                    </div>
+                    {/* ============================================================
+                        MODE A: ALL-QUESTIONS LIVE MATRIX (Best for Shuffled Multi-Player)
+                        Shows every question and its live A/B/C/D Kahoot bars at once!
+                       ============================================================ */}
+                    {isAllOverview ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                          <span style={{ fontSize: '0.84rem', fontWeight: 800, color: 'var(--text)' }}>
+                            🔀 Players are answering shuffled questions in parallel — watching all {questions.length} questions in real time:
+                          </span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700 }}>
+                            Click any card to expand full-screen view
+                          </span>
+                        </div>
 
-                    <h2 style={{ fontSize: isProjectorMode ? 'clamp(1.75rem, 3.8vw, 2.5rem)' : 'clamp(1.15rem, 2.5vw, 1.45rem)', fontWeight: 900, color: 'var(--text)', margin: '0.15rem 0', lineHeight: 1.35 }}>
-                      {inspectedQ?.title || 'Preparing question...'}
-                    </h2>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '0.9rem' }}>
+                          {questions.map((qItem, qIdx) => {
+                            const itemDist = optionDistribution[qItem.id] || optionDistribution[qIdx] || { counts: [], totalResponses: 0, correctResponses: 0 };
+                            const itemTotal = itemDist.totalResponses || 0;
+                            const itemMax = Math.max(1, ...(itemDist.counts || [1]));
+                            const isRecentlyAnswered = qIdx === lastActiveQIdx && itemTotal > 0;
 
-                    {/* Kahoot-Style Vertical Column Chart */}
-                    {inspectedQ?.options && (
-                      <div
-                        style={{
-                          display: 'grid',
-                          gridTemplateColumns: `repeat(${inspectedQ.options.length}, minmax(0, 1fr))`,
-                          gap: isProjectorMode ? '1.25rem' : '0.85rem',
-                          alignItems: 'end',
-                          height: isProjectorMode ? '220px' : '165px',
-                          padding: '1.25rem 1rem 0.75rem',
-                          backgroundColor: 'var(--surface-2)',
-                          borderRadius: 'var(--radius-card)',
-                          border: '1px solid var(--border)',
-                        }}
-                      >
-                        {inspectedQ.options.map((optText, optIdx) => {
-                          const isCorrect = optIdx === inspectedQ.correctIndex;
-                          const letter = String.fromCharCode(65 + optIdx);
-                          const count = qDist.counts?.[optIdx] || 0;
-                          const pct = totalResp > 0 ? Math.round((count / totalResp) * 100) : 0;
-                          const heightRatio = totalResp > 0 ? Math.max(10, Math.round((count / maxCount) * 100)) : 10;
-                          const colColor = barColors[optIdx % barColors.length];
-
-                          return (
-                            <div
-                              key={`col-${optIdx}`}
-                              style={{
-                                display: 'flex',
-                                flexDirection: 'column',
-                                alignItems: 'center',
-                                justifyContent: 'flex-end',
-                                height: '100%',
-                                gap: '0.4rem',
-                              }}
-                            >
-                              {/* Count & Percentage Pill Above Bar */}
+                            return (
                               <div
+                                key={qItem.id || qIdx}
+                                onClick={() => setHostInspectQIdx(qIdx)}
                                 style={{
+                                  padding: '1rem',
+                                  borderRadius: 'var(--radius-card)',
+                                  backgroundColor: 'var(--surface-2)',
+                                  border: isRecentlyAnswered ? '2px solid var(--primary)' : '1px solid var(--border)',
+                                  boxShadow: isRecentlyAnswered ? 'var(--card-shadow-hover)' : 'none',
                                   display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '0.25rem',
-                                  fontWeight: 900,
-                                  fontSize: isProjectorMode ? '1.1rem' : '0.85rem',
-                                  color: 'var(--text)',
-                                  fontVariantNumeric: 'tabular-nums',
+                                  flexDirection: 'column',
+                                  gap: '0.75rem',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.2s ease',
                                 }}
                               >
-                                <span>{count}</span>
-                                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 700 }}>
-                                  ({pct}%)
-                                </span>
-                                {isCorrect && (
-                                  <span style={{ color: '#059669', fontWeight: 900 }} title="Correct Answer">✓</span>
-                                )}
-                              </div>
-
-                              {/* Animated Vertical Column */}
-                              <div
-                                style={{
-                                  width: '100%',
-                                  maxWidth: isProjectorMode ? '110px' : '78px',
-                                  height: `${heightRatio}%`,
-                                  minHeight: '12px',
-                                  backgroundColor: colColor,
-                                  borderRadius: '10px 10px 4px 4px',
-                                  boxShadow: isCorrect ? `0 0 0 2.5px #10B981, 0 6px 16px ${colColor}55` : `0 4px 12px ${colColor}40`,
-                                  transition: 'height 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
-                                  position: 'relative',
-                                }}
-                              />
-
-                              {/* Option Letter Label Below Bar */}
-                              <div
-                                style={{
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '0.3rem',
-                                  fontSize: isProjectorMode ? '0.95rem' : '0.78rem',
-                                  fontWeight: 900,
-                                  color: 'var(--text)',
-                                }}
-                              >
-                                <span
-                                  style={{
-                                    width: '22px',
-                                    height: '22px',
-                                    borderRadius: '6px',
-                                    backgroundColor: colColor,
-                                    color: '#fff',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    fontSize: '0.74rem',
-                                  }}
-                                >
-                                  {letter}
-                                </span>
-                                {isCorrect && (
-                                  <span style={{ fontSize: '0.7rem', color: '#059669', fontWeight: 900 }}>Correct</span>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {/* Detailed Option Cards with Horizontal Fill Bars */}
-                    {inspectedQ?.options && (
-                      <div style={{ display: 'grid', gridTemplateColumns: isProjectorMode ? 'repeat(auto-fit, minmax(340px, 1fr))' : 'repeat(auto-fit, minmax(240px, 1fr))', gap: isProjectorMode ? '1rem' : '0.75rem' }}>
-                        {inspectedQ.options.map((optText, optIdx) => {
-                          const isCorrect = optIdx === inspectedQ.correctIndex;
-                          const letter = String.fromCharCode(65 + optIdx);
-                          const count = qDist.counts?.[optIdx] || 0;
-                          const pct = totalResp > 0 ? Math.round((count / totalResp) * 100) : 0;
-                          const barColor = barColors[optIdx % barColors.length];
-
-                          return (
-                            <div
-                              key={optIdx}
-                              style={{
-                                position: 'relative',
-                                overflow: 'hidden',
-                                padding: isProjectorMode ? '1.15rem 1.35rem' : '0.8rem 1rem',
-                                borderRadius: 'var(--radius-btn)',
-                                backgroundColor: isCorrect ? 'hsl(142 71% 45% / 0.08)' : 'var(--surface-2)',
-                                border: isCorrect ? '2px solid hsl(142 71% 45%)' : '1.5px solid var(--border)',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: '0.45rem',
-                              }}
-                            >
-                              <div
-                                style={{
-                                  position: 'absolute',
-                                  top: 0,
-                                  left: 0,
-                                  bottom: 0,
-                                  width: `${pct}%`,
-                                  backgroundColor: `${barColor}22`,
-                                  transition: 'width 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
-                                  pointerEvents: 'none',
-                                }}
-                              />
-
-                              <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', minWidth: 0 }}>
-                                  <span
-                                    style={{
-                                      width: isProjectorMode ? '34px' : '26px',
-                                      height: isProjectorMode ? '34px' : '26px',
-                                      borderRadius: '7px',
-                                      backgroundColor: barColor,
-                                      color: '#fff',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      fontWeight: 900,
-                                      fontSize: isProjectorMode ? '0.95rem' : '0.78rem',
-                                      flexShrink: 0,
-                                    }}
-                                  >
-                                    {letter}
-                                  </span>
-                                  <span style={{ fontWeight: isCorrect ? 800 : 700, color: 'var(--text)', fontSize: isProjectorMode ? '1.15rem' : '0.9rem', wordBreak: 'break-word' }}>
-                                    {optText}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.4rem' }}>
+                                  <Badge variant="primary" style={{ fontSize: '0.72rem', fontWeight: 900 }}>
+                                    Q{qIdx + 1}
+                                  </Badge>
+                                  <span style={{ fontSize: '0.75rem', fontWeight: 800, color: itemTotal > 0 ? 'var(--primary-text)' : 'var(--text-muted)' }}>
+                                    {itemTotal} / {participants.length || submissionStats.totalParticipants || 0} Answered
                                   </span>
                                 </div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexShrink: 0 }}>
-                                  <span style={{ fontWeight: 900, fontSize: isProjectorMode ? '1.05rem' : '0.82rem', color: 'var(--text)' }}>
-                                    {count} ({pct}%)
-                                  </span>
-                                  {isCorrect && (
-                                    <Badge variant="primary" style={{ backgroundColor: 'hsl(142 71% 45%)', color: '#fff', fontSize: '0.68rem', padding: '0.1rem 0.45rem' }}>
-                                      ✓ Correct
-                                    </Badge>
-                                  )}
-                                </div>
-                              </div>
 
-                              <div style={{ position: 'relative', zIndex: 1, width: '100%', height: isProjectorMode ? '8px' : '6px', backgroundColor: 'var(--surface)', borderRadius: '999px', overflow: 'hidden' }}>
+                                <div style={{ fontSize: '0.92rem', fontWeight: 800, color: 'var(--text)', lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', minHeight: '2.5em' }}>
+                                  {qItem.title}
+                                </div>
+
+                                {/* Mini Vertical Kahoot Column Chart */}
                                 <div
                                   style={{
-                                    width: `${pct}%`,
-                                    height: '100%',
-                                    backgroundColor: barColor,
-                                    borderRadius: '999px',
-                                    transition: 'width 0.35s ease',
+                                    display: 'grid',
+                                    gridTemplateColumns: `repeat(${(qItem.options || []).length || 4}, minmax(0, 1fr))`,
+                                    gap: '0.45rem',
+                                    alignItems: 'end',
+                                    height: '86px',
+                                    padding: '0.6rem 0.5rem 0.35rem',
+                                    backgroundColor: 'var(--surface)',
+                                    borderRadius: '10px',
+                                    border: '1px solid var(--border)',
                                   }}
-                                />
+                                >
+                                  {(qItem.options || []).map((optText, optIdx) => {
+                                    const isCorrect = optIdx === qItem.correctIndex;
+                                    const letter = String.fromCharCode(65 + optIdx);
+                                    const c = itemDist.counts?.[optIdx] || 0;
+                                    const pct = itemTotal > 0 ? Math.round((c / itemTotal) * 100) : 0;
+                                    const hRatio = itemTotal > 0 ? Math.max(12, Math.round((c / itemMax) * 100)) : 12;
+                                    const colColor = barColors[optIdx % barColors.length];
+
+                                    return (
+                                      <div key={optIdx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%', gap: '0.2rem' }}>
+                                        <span style={{ fontSize: '0.68rem', fontWeight: 900, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
+                                          {c} ({pct}%)
+                                        </span>
+                                        <div
+                                          style={{
+                                            width: '100%',
+                                            maxWidth: '42px',
+                                            height: `${hRatio}%`,
+                                            minHeight: '8px',
+                                            backgroundColor: colColor,
+                                            borderRadius: '6px 6px 2px 2px',
+                                            boxShadow: isCorrect ? '0 0 0 2px #10B981' : 'none',
+                                            transition: 'height 0.35s ease',
+                                          }}
+                                        />
+                                        <span style={{ fontSize: '0.68rem', fontWeight: 900, color: isCorrect ? '#059669' : 'var(--text-muted)' }}>
+                                          {letter}{isCorrect ? '✓' : ''}
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+
+                                {/* Option Breakdown Rows */}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                                  {(qItem.options || []).map((optText, optIdx) => {
+                                    const isCorrect = optIdx === qItem.correctIndex;
+                                    const letter = String.fromCharCode(65 + optIdx);
+                                    const c = itemDist.counts?.[optIdx] || 0;
+                                    const pct = itemTotal > 0 ? Math.round((c / itemTotal) * 100) : 0;
+                                    const colColor = barColors[optIdx % barColors.length];
+                                    return (
+                                      <div
+                                        key={optIdx}
+                                        style={{
+                                          position: 'relative',
+                                          overflow: 'hidden',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'space-between',
+                                          gap: '0.4rem',
+                                          padding: '0.32rem 0.55rem',
+                                          borderRadius: '7px',
+                                          backgroundColor: 'var(--surface)',
+                                          border: isCorrect ? '1.5px solid #10B981' : '1px solid var(--border)',
+                                          fontSize: '0.76rem',
+                                        }}
+                                      >
+                                        <div
+                                          style={{
+                                            position: 'absolute',
+                                            top: 0,
+                                            left: 0,
+                                            bottom: 0,
+                                            width: `${pct}%`,
+                                            backgroundColor: `${colColor}20`,
+                                            transition: 'width 0.35s ease',
+                                            pointerEvents: 'none',
+                                          }}
+                                        />
+                                        <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}>
+                                          <span style={{ width: '18px', height: '18px', borderRadius: '4px', backgroundColor: colColor, color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.66rem', fontWeight: 900, flexShrink: 0 }}>
+                                            {letter}
+                                          </span>
+                                          <span style={{ fontWeight: isCorrect ? 800 : 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                            {optText}
+                                          </span>
+                                        </div>
+                                        <span style={{ position: 'relative', zIndex: 1, fontWeight: 900, color: 'var(--text)', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
+                                          {c} ({pct}%)
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
                               </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
+                        </div>
                       </div>
+                    ) : (
+                      /* ============================================================
+                          MODE B: SINGLE FOCUSED QUESTION VIEW (With Big Kahoot Chart)
+                         ============================================================ */
+                      <>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                            <Badge variant="primary" style={{ fontSize: isProjectorMode ? '0.92rem' : '0.75rem', fontWeight: 900 }}>
+                              QUESTION {activeHostQIdx + 1} OF {questions.length}
+                            </Badge>
+                            <Badge variant="secondary" style={{ fontSize: isProjectorMode ? '0.9rem' : '0.75rem' }}>
+                              {inspectedQ?.points || 10} pts
+                            </Badge>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <Badge variant="primary" style={{ fontSize: isProjectorMode ? '0.9rem' : '0.75rem' }}>
+                              <BarChart2 size={12} style={{ marginRight: '4px' }} /> {totalResp} Response{totalResp !== 1 ? 's' : ''} on Q{activeHostQIdx + 1}
+                            </Badge>
+                          </div>
+                        </div>
+
+                        <h2 style={{ fontSize: isProjectorMode ? 'clamp(1.75rem, 3.8vw, 2.5rem)' : 'clamp(1.15rem, 2.5vw, 1.45rem)', fontWeight: 900, color: 'var(--text)', margin: '0.15rem 0', lineHeight: 1.35 }}>
+                          {inspectedQ?.title || 'Preparing question...'}
+                        </h2>
+
+                        {/* Kahoot-Style Vertical Column Chart */}
+                        {inspectedQ?.options && (
+                          <div
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: `repeat(${inspectedQ.options.length}, minmax(0, 1fr))`,
+                              gap: isProjectorMode ? '1.25rem' : '0.85rem',
+                              alignItems: 'end',
+                              height: isProjectorMode ? '220px' : '165px',
+                              padding: '1.25rem 1rem 0.75rem',
+                              backgroundColor: 'var(--surface-2)',
+                              borderRadius: 'var(--radius-card)',
+                              border: '1px solid var(--border)',
+                            }}
+                          >
+                            {inspectedQ.options.map((optText, optIdx) => {
+                              const isCorrect = optIdx === inspectedQ.correctIndex;
+                              const letter = String.fromCharCode(65 + optIdx);
+                              const count = qDist.counts?.[optIdx] || 0;
+                              const pct = totalResp > 0 ? Math.round((count / totalResp) * 100) : 0;
+                              const heightRatio = totalResp > 0 ? Math.max(10, Math.round((count / maxCount) * 100)) : 10;
+                              const colColor = barColors[optIdx % barColors.length];
+
+                              return (
+                                <div
+                                  key={`col-${optIdx}`}
+                                  style={{
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: 'center',
+                                    justifyContent: 'flex-end',
+                                    height: '100%',
+                                    gap: '0.4rem',
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '0.25rem',
+                                      fontWeight: 900,
+                                      fontSize: isProjectorMode ? '1.1rem' : '0.85rem',
+                                      color: 'var(--text)',
+                                      fontVariantNumeric: 'tabular-nums',
+                                    }}
+                                  >
+                                    <span>{count}</span>
+                                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 700 }}>
+                                      ({pct}%)
+                                    </span>
+                                    {isCorrect && (
+                                      <span style={{ color: '#059669', fontWeight: 900 }} title="Correct Answer">✓</span>
+                                    )}
+                                  </div>
+
+                                  <div
+                                    style={{
+                                      width: '100%',
+                                      maxWidth: isProjectorMode ? '110px' : '78px',
+                                      height: `${heightRatio}%`,
+                                      minHeight: '12px',
+                                      backgroundColor: colColor,
+                                      borderRadius: '10px 10px 4px 4px',
+                                      boxShadow: isCorrect ? `0 0 0 2.5px #10B981, 0 6px 16px ${colColor}55` : `0 4px 12px ${colColor}40`,
+                                      transition: 'height 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                                      position: 'relative',
+                                    }}
+                                  />
+
+                                  <div
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.3rem',
+                                      fontSize: isProjectorMode ? '0.95rem' : '0.78rem',
+                                      fontWeight: 900,
+                                      color: 'var(--text)',
+                                    }}
+                                  >
+                                    <span
+                                      style={{
+                                        width: '22px',
+                                        height: '22px',
+                                        borderRadius: '6px',
+                                        backgroundColor: colColor,
+                                        color: '#fff',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        fontSize: '0.74rem',
+                                      }}
+                                    >
+                                      {letter}
+                                    </span>
+                                    {isCorrect && (
+                                      <span style={{ fontSize: '0.7rem', color: '#059669', fontWeight: 900 }}>Correct</span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Detailed Option Cards with Horizontal Fill Bars */}
+                        {inspectedQ?.options && (
+                          <div style={{ display: 'grid', gridTemplateColumns: isProjectorMode ? 'repeat(auto-fit, minmax(340px, 1fr))' : 'repeat(auto-fit, minmax(240px, 1fr))', gap: isProjectorMode ? '1rem' : '0.75rem' }}>
+                            {inspectedQ.options.map((optText, optIdx) => {
+                              const isCorrect = optIdx === inspectedQ.correctIndex;
+                              const letter = String.fromCharCode(65 + optIdx);
+                              const count = qDist.counts?.[optIdx] || 0;
+                              const pct = totalResp > 0 ? Math.round((count / totalResp) * 100) : 0;
+                              const barColor = barColors[optIdx % barColors.length];
+
+                              return (
+                                <div
+                                  key={optIdx}
+                                  style={{
+                                    position: 'relative',
+                                    overflow: 'hidden',
+                                    padding: isProjectorMode ? '1.15rem 1.35rem' : '0.8rem 1rem',
+                                    borderRadius: 'var(--radius-btn)',
+                                    backgroundColor: isCorrect ? 'hsl(142 71% 45% / 0.08)' : 'var(--surface-2)',
+                                    border: isCorrect ? '2px solid hsl(142 71% 45%)' : '1.5px solid var(--border)',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '0.45rem',
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      position: 'absolute',
+                                      top: 0,
+                                      left: 0,
+                                      bottom: 0,
+                                      width: `${pct}%`,
+                                      backgroundColor: `${barColor}22`,
+                                      transition: 'width 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+                                      pointerEvents: 'none',
+                                    }}
+                                  />
+
+                                  <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', minWidth: 0 }}>
+                                      <span
+                                        style={{
+                                          width: isProjectorMode ? '34px' : '26px',
+                                          height: isProjectorMode ? '34px' : '26px',
+                                          borderRadius: '7px',
+                                          backgroundColor: barColor,
+                                          color: '#fff',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          fontWeight: 900,
+                                          fontSize: isProjectorMode ? '0.95rem' : '0.78rem',
+                                          flexShrink: 0,
+                                        }}
+                                      >
+                                        {letter}
+                                      </span>
+                                      <span style={{ fontWeight: isCorrect ? 800 : 700, color: 'var(--text)', fontSize: isProjectorMode ? '1.15rem' : '0.9rem', wordBreak: 'break-word' }}>
+                                        {optText}
+                                      </span>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexShrink: 0 }}>
+                                      <span style={{ fontWeight: 900, fontSize: isProjectorMode ? '1.05rem' : '0.82rem', color: 'var(--text)' }}>
+                                        {count} ({pct}%)
+                                      </span>
+                                      {isCorrect && (
+                                        <Badge variant="primary" style={{ backgroundColor: 'hsl(142 71% 45%)', color: '#fff', fontSize: '0.68rem', padding: '0.1rem 0.45rem' }}>
+                                          ✓ Correct
+                                        </Badge>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div style={{ position: 'relative', zIndex: 1, width: '100%', height: isProjectorMode ? '8px' : '6px', backgroundColor: 'var(--surface)', borderRadius: '999px', overflow: 'hidden' }}>
+                                    <div
+                                      style={{
+                                        width: `${pct}%`,
+                                        height: '100%',
+                                        backgroundColor: barColor,
+                                        borderRadius: '999px',
+                                        transition: 'width 0.35s ease',
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 );

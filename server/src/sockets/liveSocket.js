@@ -775,11 +775,18 @@ class LiveSessionManager {
             ? currentQDist.totalResponses
             : activeParticipants.filter(([, p]) => (p.answers || []).length > room.currentQuestionIdx).length;
 
+          const canonicalIdx = (room.questions || []).findIndex(
+            (q) => String(q._id || q.id) === canonicalQId
+          );
+
           io.to(code).emit('leaderboard:updated', {
             leaderboard: liveLeaderboard,
             totalParticipants: totalActive || room.participants.size,
             submittedCount: answeredCount,
             optionDistribution,
+            lastAnsweredQuestionIdx: canonicalIdx >= 0 ? canonicalIdx : targetQIdx,
+            lastAnsweredQuestionId: canonicalQId,
+            lastAnswererName: participant.name,
           });
 
           // Send confirmation feedback back to participant
