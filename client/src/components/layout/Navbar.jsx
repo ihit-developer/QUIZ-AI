@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { BarChart3, BrainCircuit, CirclePlus, LayoutDashboard, LogOut, Menu, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { BarChart3, BrainCircuit, CirclePlus, Compass, LayoutDashboard, LogOut, Menu, ShieldCheck, Sparkles, UserRound, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { ThemeToggle } from '../ui/ThemeToggle';
+import { BRAND_CONFIG } from '../../config/brand';
 
 export const Navbar = ({ compact = false }) => {
   const { user, logout } = useAuth();
@@ -12,18 +13,72 @@ export const Navbar = ({ compact = false }) => {
   const canJoinQuiz = user?.role !== 'admin';
   const isHost = user?.role === 'host';
   const isAdmin = user?.role === 'admin';
+
   return (
     <header className={`topbar ${compact ? 'topbar-compact' : ''}`}>
       <div className="topbar-inner">
-        <Link to="/" className="topbar-brand"><span className="topbar-mark"><Sparkles size={17} /></span><span>quizese</span></Link>
-        {!compact && <nav className="topbar-links"><Link className={isActive('/') ? 'active' : ''} to="/">Home</Link>{canJoinQuiz && <Link className={isActive('/join') ? 'active' : ''} to="/join">Join quiz</Link>}{user && <Link className={isActive('/dashboard') ? 'active' : ''} to="/dashboard">Workspace</Link>}</nav>}
+        <Link to="/" className="topbar-brand">
+          <span className="topbar-mark"><Sparkles size={17} /></span>
+          <span>{BRAND_CONFIG.name}</span>
+        </Link>
+        {!compact && (
+          <nav className="topbar-links">
+            <Link className={isActive('/') ? 'active' : ''} to="/">Home</Link>
+            {canJoinQuiz && <Link className={isActive('/join') ? 'active' : ''} to="/join">Join quiz</Link>}
+            {user && <Link className={isActive('/dashboard') ? 'active' : ''} to="/dashboard">Workspace</Link>}
+          </nav>
+        )}
         <div className="topbar-actions">
           <ThemeToggle />
-          {user ? <><Link to="/dashboard" className="topbar-dashboard" title="Go to dashboard"><LayoutDashboard size={17} /><span>Dashboard</span></Link><Link to="/profile" className="topbar-profile">{user.avatar ? <img src={user.avatar} alt="" /> : <span>{user.name?.slice(0, 1).toUpperCase()}</span>}<em>{user.name}</em></Link><button className="topbar-logout" onClick={logout} aria-label="Log out" title="Log out"><LogOut size={17} /></button></> : <><Link className="topbar-signin" to="/login">Sign in</Link><Link className="btn-primary topbar-register" to="/register">Create account</Link></>}
-          <button className="topbar-menu" onClick={() => setOpen(!open)} aria-label="Open navigation">{open ? <X size={20} /> : <Menu size={20} />}</button>
+          {user ? (
+            <>
+              <Link to="/dashboard" className="topbar-dashboard" title="Go to dashboard">
+                <LayoutDashboard size={16} />
+                <span>Dashboard</span>
+              </Link>
+              <Link to="/profile" className="topbar-profile">
+                {user.avatar ? <img src={user.avatar} alt="" /> : <span>{user.name?.slice(0, 1).toUpperCase()}</span>}
+                <em>{user.name}</em>
+              </Link>
+              <button className="topbar-logout" onClick={logout} aria-label="Log out" title="Log out">
+                <LogOut size={17} />
+              </button>
+            </>
+          ) : (
+            <>
+              <Link className="topbar-signin" to="/login">Sign in</Link>
+              <Link className="btn-primary topbar-register" to="/register">Create account</Link>
+            </>
+          )}
+          <button className="topbar-menu" onClick={() => setOpen(!open)} aria-label="Open navigation">
+            {open ? <X size={20} /> : <Menu size={20} />}
+          </button>
         </div>
       </div>
-      {open && <nav className="topbar-mobile"><Link to="/" onClick={() => setOpen(false)}>Home</Link>{user ? <><Link to="/dashboard" onClick={() => setOpen(false)}><LayoutDashboard size={17} /> Dashboard</Link>{isHost && <Link to="/create-quiz" onClick={() => setOpen(false)}><CirclePlus size={17} /> Create quiz</Link>}{isHost && <Link to="/analytics" onClick={() => setOpen(false)}><BarChart3 size={17} /> Analytics</Link>}{!isAdmin && <Link to="/join" onClick={() => setOpen(false)}>Join quiz</Link>}<Link to="/predictions" onClick={() => setOpen(false)}><BrainCircuit size={17} /> AI insights</Link>{isAdmin && <Link to="/admin" onClick={() => setOpen(false)}><ShieldCheck size={17} /> Administration</Link>}<Link to="/profile" onClick={() => setOpen(false)}>Profile & settings</Link><button type="button" onClick={logout}><LogOut size={17} /> Log out</button></> : <><Link to="/join" onClick={() => setOpen(false)}>Join quiz</Link><Link to="/login" onClick={() => setOpen(false)}>Sign in</Link><Link to="/register" onClick={() => setOpen(false)}>Create account</Link></>}</nav>}
+
+      {open && (
+        <nav className="topbar-mobile">
+          <Link to="/" onClick={() => setOpen(false)}>Home</Link>
+          {user ? (
+            <>
+              <Link to="/dashboard" onClick={() => setOpen(false)}><LayoutDashboard size={17} /> Dashboard</Link>
+              {isHost && <Link to="/create-quiz" onClick={() => setOpen(false)}><CirclePlus size={17} /> Create quiz</Link>}
+              {isHost && <Link to="/analytics" onClick={() => setOpen(false)}><BarChart3 size={17} /> Analytics</Link>}
+              {!isAdmin && <Link to="/join" onClick={() => setOpen(false)}><Compass size={17} /> Join quiz</Link>}
+              <Link to="/predictions" onClick={() => setOpen(false)}><BrainCircuit size={17} /> AI insights</Link>
+              {isAdmin && <Link to="/admin" onClick={() => setOpen(false)}><ShieldCheck size={17} /> Administration</Link>}
+              <Link to="/profile" onClick={() => setOpen(false)}><UserRound size={17} /> Profile & settings</Link>
+              <button type="button" onClick={() => { setOpen(false); logout(); }}><LogOut size={17} /> Log out</button>
+            </>
+          ) : (
+            <>
+              <Link to="/join" onClick={() => setOpen(false)}><Compass size={17} /> Join quiz</Link>
+              <Link to="/login" onClick={() => setOpen(false)}>Sign in</Link>
+              <Link to="/register" onClick={() => setOpen(false)}>Create account</Link>
+            </>
+          )}
+        </nav>
+      )}
     </header>
   );
 };

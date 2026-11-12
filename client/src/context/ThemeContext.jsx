@@ -1,14 +1,25 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { BRAND_CONFIG, THEME_PALETTES } from '../config/brand';
 
 const ThemeContext = createContext();
 
 export const ThemeProvider = ({ children }) => {
   const [theme, setThemeState] = useState(() => {
-    const saved = localStorage.getItem('quizese_theme');
-    if (saved === 'dark' || saved === 'light') return saved;
-    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
-      ? 'dark'
-      : 'light';
+    try {
+      const saved = localStorage.getItem('quizese_theme');
+      if (saved === 'dark' || saved === 'light') return saved;
+    } catch {}
+    return 'light';
+  });
+
+  const [palette, setPaletteState] = useState(() => {
+    try {
+      const savedPalette = localStorage.getItem('quizese_palette');
+      if (savedPalette && THEME_PALETTES.some((p) => p.id === savedPalette)) {
+        return savedPalette;
+      }
+    } catch {}
+    return BRAND_CONFIG.defaultPalette || 'indigo';
   });
 
   const [resolvedTheme, setResolvedTheme] = useState(() => {
@@ -44,7 +55,9 @@ export const ThemeProvider = ({ children }) => {
     };
 
     updateResolved();
-    localStorage.setItem('quizese_theme', theme);
+    try {
+      localStorage.setItem('quizese_theme', theme);
+    } catch {}
 
     if (theme === 'system' && window.matchMedia) {
       const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
@@ -54,12 +67,33 @@ export const ThemeProvider = ({ children }) => {
     }
   }, [theme]);
 
+  useEffect(() => {
+    const root = document.documentElement;
+    root.setAttribute('data-palette', palette);
+    try {
+      localStorage.setItem('quizese_palette', palette);
+    } catch {}
+  }, [palette]);
+
   const setTheme = (nextTheme) => {
     setThemeState(nextTheme);
   };
 
+  const setPalette = (nextPalette) => {
+    setPaletteState(nextPalette);
+  };
+
   return (
-    <ThemeContext.Provider value={{ theme, resolvedTheme, setTheme }}>
+    <ThemeContext.Provider
+      value={{
+        theme,
+        resolvedTheme,
+        setTheme,
+        palette,
+        setPalette,
+        palettes: THEME_PALETTES,
+      }}
+    >
       {children}
     </ThemeContext.Provider>
   );

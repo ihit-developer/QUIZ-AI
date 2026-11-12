@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { BarChart3, BrainCircuit, CirclePlus, Compass, LayoutDashboard, LogOut, Settings2, ShieldCheck, Sparkles, UserRound } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Navbar } from './Navbar';
+import { BRAND_CONFIG } from '../../config/brand';
 
 const appPaths = ['/dashboard', '/profile', '/create-quiz', '/edit-quiz', '/analytics', '/predictions', '/admin'];
 
@@ -26,7 +27,10 @@ export const MainLayout = ({ children }) => {
     <div className={isWorkspace ? 'workspace-shell' : 'site-shell'}>
       {isWorkspace && (
         <aside className="workspace-rail">
-          <Link to="/" className="workspace-brand" aria-label="Quizese home"><span className="workspace-brand-mark"><Sparkles size={18} /></span><span>quizese</span></Link>
+          <Link to="/" className="workspace-brand" aria-label={`${BRAND_CONFIG.displayName} home`}>
+            <span className="workspace-brand-mark"><Sparkles size={18} /></span>
+            <span>{BRAND_CONFIG.name}</span>
+          </Link>
           <p className="workspace-rail-label">Workspace</p>
           <nav className="workspace-rail-nav">
             <RailLink to="/dashboard" label="Dashboard" icon={LayoutDashboard} active={location.pathname === '/dashboard'} />
@@ -38,7 +42,7 @@ export const MainLayout = ({ children }) => {
           </nav>
           <div className="workspace-rail-bottom">
             <RailLink to="/profile" label="Profile & settings" icon={UserRound} active={location.pathname.startsWith('/profile')} />
-            <span className="workspace-role"><Settings2 size={14} /> {user?.role}</span>
+            <span className="workspace-role"><Settings2 size={14} /> {user?.role} account</span>
             <button type="button" className="workspace-logout" onClick={logout}><LogOut size={17} /> Log out</button>
           </div>
         </aside>
@@ -46,7 +50,12 @@ export const MainLayout = ({ children }) => {
       <div className="site-frame">
         <Navbar compact={isWorkspace} />
         <main className={isWorkspace ? 'workspace-main' : 'site-main'}>{children}</main>
-        {!isWorkspace && <footer className="site-footer"><span>© {new Date().getFullYear()} Quizese</span><span>Thoughtful assessment, clearly delivered.</span></footer>}
+        {!isWorkspace && (
+          <footer className="site-footer">
+            <span>© {new Date().getFullYear()} {BRAND_CONFIG.displayName}</span>
+            <span>{BRAND_CONFIG.footerCopy}</span>
+          </footer>
+        )}
       </div>
     </div>
   );
