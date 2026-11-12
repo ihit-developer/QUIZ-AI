@@ -183,8 +183,13 @@ class LiveSessionManager {
         socket.emit('room:created', { roomCode: code, questionsCount: questions.length });
 
         const participantList = Array.from(existingParticipants.values()).map((p) => p.name);
+        const participantDetails = Array.from(existingParticipants.values()).map((p) => ({
+          name: p.name,
+          avatar: p.avatar || '🦊',
+        }));
         io.to(code).emit('lobby:updated', {
           participants: participantList,
+          participantDetails,
           count: participantList.length,
           status: roomObj.status,
         });
@@ -193,7 +198,7 @@ class LiveSessionManager {
       });
 
       // 2. Participant joins live room lobby
-      socket.on('participant:join-room', async ({ roomCode, participantName, userId }) => {
+      socket.on('participant:join-room', async ({ roomCode, participantName, userId, avatar }) => {
         const code = roomCode.toUpperCase();
         let room = await liveRoomStore.get(code) || this.rooms.get(code);
 
@@ -274,6 +279,8 @@ class LiveSessionManager {
           socketId: socket.id,
           userId: userId || null,
           name: effectiveName,
+          avatar: avatar || '🦊',
+          streak: 0,
           score: existingScore,
           answers: existingAnswers,
           lastAnsweredQIdx: -1,
@@ -282,8 +289,13 @@ class LiveSessionManager {
         await liveRoomStore.set(code, room);
 
         const participantList = Array.from(room.participants.values()).map((p) => p.name);
+        const participantDetails = Array.from(room.participants.values()).map((p) => ({
+          name: p.name,
+          avatar: p.avatar || '🦊',
+        }));
         io.to(code).emit('lobby:updated', {
           participants: participantList,
+          participantDetails,
           count: participantList.length,
           status: room.status,
         });
@@ -306,6 +318,7 @@ class LiveSessionManager {
             currentScore: existingScore,
             questions: assignedQuestions,
             title: room.quizTitle,
+            enablePowerUps: room.enablePowerUps !== false,
           });
         }
       });
@@ -326,11 +339,12 @@ class LiveSessionManager {
         return (questions || []).map((q, idx) => {
           const rawOptions = (q.options || []).map((o) => {
             if (typeof o === 'string') {
-              return { text: o, isCorrect: false };
+              return { text: o, isCorrect: false, explanation: '' };
             }
             return {
               text: o.text,
               isCorrect: Boolean(o.isCorrect === true || o.isCorrect === 'true' || o.isCorrect),
+              explanation: o.explanation || '',
             };
           });
 
@@ -343,6 +357,11 @@ class LiveSessionManager {
             correctIndex = 0;
           }
 
+          const correctOpt = finalOptions[correctIndex >= 0 ? correctIndex : 0];
+          const fallbackTip = correctOpt?.text
+            ? `Key takeaway: "${correctOpt.text}" is the accurate solution for this topic (${q.topicTag || 'General'}). Review the core principles behind this question to strengthen retention.`
+            : '';
+
           return {
             id: String(q._id || q.id),
             title: q.title,
@@ -350,6 +369,7 @@ class LiveSessionManager {
             correctIndex: correctIndex >= 0 ? correctIndex : 0,
             points: q.points || 10,
             timeLimitSeconds: getQuestionTimeLimit(room, idx),
+            explanation: q.explanation || correctOpt?.explanation || fallbackTip,
           };
         });
       };
@@ -391,11 +411,14 @@ class LiveSessionManager {
             .sort((a, b) => b.score - a.score)
             .map((p) => ({
               name: p.name,
+              avatar: p.avatar || '🦊',
               score: p.score,
+              streak: p.streak || 0,
               percentage: p.percentage || 0,
               passed: p.passed || false,
               attemptId: p.savedAttemptId || null,
               answersCount: (p.answers || []).length,
+              status: p.status || 'active',
             }));
 
           io.to(code).emit('quiz:ended', {
@@ -447,7 +470,7 @@ class LiveSessionManager {
       };
 
       // 3. Host starts quiz (Blocked if quiz has ended)
-      socket.on('host:start-quiz', async ({ roomCode, shuffleQuestions }) => {
+      socket.on('host:start-quiz', async ({ roomCode, shuffleQuestions, enablePowerUps }) => {
         const code = roomCode.toUpperCase();
         const room = await liveRoomStore.get(code) || this.rooms.get(code);
         if (room) {
@@ -468,10 +491,12 @@ class LiveSessionManager {
             shuffleQuestions !== false &&
             room.settings?.shuffleQuestions !== false
           );
+          const powerUpsAllowed = enablePowerUps !== false;
 
           room.status = 'active';
           room.startedAt = new Date();
           room.currentQuestionIdx = 0;
+          room.enablePowerUps = powerUpsAllowed;
           await liveRoomStore.set(code, room);
 
           // 1. Host receives standard question order for public projection/review
@@ -479,6 +504,7 @@ class LiveSessionManager {
             questionIdx: 0,
             questions: buildSanitizedQuestions(room, room.questions, false),
             title: room.quizTitle,
+            enablePowerUps: powerUpsAllowed,
           });
 
           // 2. Each participant receives their OWN personalized question shuffle AND option shuffle!
@@ -497,6 +523,7 @@ class LiveSessionManager {
                   questionIdx: 0,
                   questions: personalizedQuestions,
                   title: room.quizTitle,
+                  enablePowerUps: powerUpsAllowed,
                 });
               }
             }
@@ -564,8 +591,17 @@ class LiveSessionManager {
             ? Boolean(matchedOpt.isCorrect === true || matchedOpt.isCorrect === 'true' || matchedOpt.isCorrect)
             : Boolean(isCorrect);
 
-          const pts = actualCorrect ? (Number(pointsAwarded) || currentQ?.points || 10) : 0;
-          participant.score += pts;
+          const rawPts = Number(pointsAwarded);
+          const pts = actualCorrect
+            ? (rawPts > 0 ? rawPts : (currentQ?.points || 10))
+            : (rawPts < 0 ? rawPts : 0);
+          participant.score = Math.max(0, (participant.score || 0) + pts);
+
+          if (actualCorrect) {
+            participant.streak = (participant.streak || 0) + 1;
+          } else {
+            participant.streak = 0;
+          }
 
           participant.answers.push({
             questionId: currentQ?._id || currentQ?.id || null,
@@ -581,7 +617,9 @@ class LiveSessionManager {
             .sort((a, b) => b.score - a.score)
             .map((p) => ({
               name: p.name,
+              avatar: p.avatar || '🦊',
               score: p.score,
+              streak: p.streak || 0,
               answersCount: (p.answers || []).length,
               lastAnsweredQIdx: p.lastAnsweredQIdx,
               status: p.status || 'active',
@@ -625,7 +663,9 @@ class LiveSessionManager {
               .sort((a, b) => b.score - a.score)
               .map((p) => ({
                 name: p.name,
+                avatar: p.avatar || '🦊',
                 score: p.score,
+                streak: p.streak || 0,
                 percentage: p.percentage || 0,
                 passed: p.passed || false,
                 attemptId: p.savedAttemptId || null,
@@ -665,7 +705,9 @@ class LiveSessionManager {
               .sort((a, b) => b.score - a.score)
               .map((p) => ({
                 name: p.name,
+                avatar: p.avatar || '🦊',
                 score: p.score,
+                streak: p.streak || 0,
                 percentage: p.percentage || 0,
                 passed: p.passed || false,
                 attemptId: p.savedAttemptId || null,
@@ -776,7 +818,9 @@ class LiveSessionManager {
               .sort((a, b) => b.score - a.score)
               .map((p) => ({
                 name: p.name,
+                avatar: p.avatar || '🦊',
                 score: p.score,
+                streak: p.streak || 0,
                 percentage: p.percentage || 0,
                 passed: p.passed || false,
                 attemptId: p.savedAttemptId || null,
@@ -789,6 +833,21 @@ class LiveSessionManager {
               canRestart: false,
             });
           }
+        }
+      });
+
+      // 4d. Send real-time emoji reaction (bubbles across room screens)
+      socket.on('room:send-reaction', async ({ roomCode, emoji }) => {
+        const code = roomCode.toUpperCase();
+        const room = await liveRoomStore.get(code) || this.rooms.get(code);
+        if (room) {
+          const participant = room.participants?.get(socket.id);
+          io.to(code).emit('room:reaction', {
+            emoji: emoji || '🔥',
+            senderName: participant?.name || 'Player',
+            senderAvatar: participant?.avatar || '🦊',
+            id: `${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          });
         }
       });
 
@@ -816,11 +875,14 @@ class LiveSessionManager {
             .sort((a, b) => b.score - a.score)
             .map((p) => ({
               name: p.name,
+              avatar: p.avatar || '🦊',
               score: p.score,
+              streak: p.streak || 0,
               percentage: p.percentage || 0,
               passed: p.passed || false,
               attemptId: p.savedAttemptId || null,
               answersCount: (p.answers || []).length,
+              status: p.status || 'active',
             }));
 
           io.to(code).emit('quiz:ended', {
@@ -838,8 +900,13 @@ class LiveSessionManager {
               room.participants.delete(socket.id);
               liveRoomStore.set(code, room);
               const participantList = Array.from(room.participants.values()).map((p) => p.name);
+              const participantDetails = Array.from(room.participants.values()).map((p) => ({
+                name: p.name,
+                avatar: p.avatar || '🦊',
+              }));
               io.to(code).emit('lobby:updated', {
                 participants: participantList,
+                participantDetails,
                 count: participantList.length,
               });
             } else if (room.status === 'active') {

@@ -16,6 +16,7 @@ import {
   VolumeX,
   Check,
   Crown,
+  Flame,
 } from 'lucide-react';
 import { getSocket } from '../../services/socket';
 import { useAuth } from '../../context/AuthContext';
@@ -26,6 +27,9 @@ import { TimerRing } from '../../components/ui/TimerRing';
 import { PartyPopperBoom } from '../../components/quiz/PartyPopperBoom';
 import toast from 'react-hot-toast';
 import confetti from 'canvas-confetti';
+
+const AVATARS = ['🦊', '🦁', '🐼', '🚀', '⚡', '🤖', '🧙', '🦄', '🐯', '🦉', '🐱', '🐶'];
+const REACTION_EMOJIS = ['❤️', '👏', '😂', '🔥', '🚀', '🤯', '💡', '🎯'];
 
 export const LiveRoom = () => {
   const { code = 'JS8821' } = useParams();
@@ -57,6 +61,31 @@ export const LiveRoom = () => {
   const [myScore, setMyScore] = useState(0);
   const [hasCancelled, setHasCancelled] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
+
+  // New Interactive Player Features State
+  const [selectedAvatar, setSelectedAvatar] = useState(() => {
+    try {
+      return localStorage.getItem('user_quiz_avatar') || '🦊';
+    } catch {
+      return '🦊';
+    }
+  });
+  const [participantDetails, setParticipantDetails] = useState([]);
+  const [floatingReactions, setFloatingReactions] = useState([]);
+  const [streak, setStreak] = useState(0);
+  const [maxStreak, setMaxStreak] = useState(0);
+  const [powerUps, setPowerUps] = useState({
+    fiftyFifty: true,
+    extraTime: true,
+    doubleDown: true,
+  });
+  const [eliminatedOptions, setEliminatedOptions] = useState([]);
+  const [doubleDownActive, setDoubleDownActive] = useState(false);
+  const [reviewHistory, setReviewHistory] = useState([]);
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [enablePowerUpsLobby, setEnablePowerUpsLobby] = useState(true);
+  const [powerUpsEnabled, setPowerUpsEnabled] = useState(true);
+  const [lastPointsDelta, setLastPointsDelta] = useState(0);
 
   const [questionTimer, setQuestionTimer] = useState({ secondsLeft: 30, totalSeconds: 30 });
   const [submissionStats, setSubmissionStats] = useState({ submittedCount: 0, totalParticipants: 0 });
@@ -104,6 +133,7 @@ export const LiveRoom = () => {
               roomCode,
               participantName: user?.name || `Player_${Math.floor(Math.random() * 900 + 100)}`,
               userId: user?.id || user?._id || null,
+              avatar: selectedAvatar,
             });
           }
         } else {
@@ -111,6 +141,7 @@ export const LiveRoom = () => {
             roomCode,
             participantName: user?.name || `Player_${Math.floor(Math.random() * 900 + 100)}`,
             userId: user?.id || user?._id || null,
+            avatar: selectedAvatar,
           });
         }
       }).catch(() => {
@@ -118,6 +149,7 @@ export const LiveRoom = () => {
           roomCode,
           participantName: user?.name || `Player_${Math.floor(Math.random() * 900 + 100)}`,
           userId: user?.id || user?._id || null,
+          avatar: selectedAvatar,
         });
       });
     });
@@ -129,13 +161,31 @@ export const LiveRoom = () => {
     };
 
     const onLobbyUpdated = (data) => {
-      // participants is an array of name strings
       setParticipants(data.participants || []);
+      if (data.participantDetails) {
+        setParticipantDetails(data.participantDetails);
+      }
       if (data.status === 'active') setRoomState('in_progress');
+    };
+
+    const onRoomReaction = (data) => {
+      if (!data) return;
+      const reactionItem = {
+        id: data.id || `${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        emoji: data.emoji || '🔥',
+        senderName: data.senderName || 'Player',
+        senderAvatar: data.senderAvatar || '🦊',
+        left: 12 + Math.random() * 76,
+      };
+      setFloatingReactions((prev) => [...prev.slice(-14), reactionItem]);
+      setTimeout(() => {
+        setFloatingReactions((prev) => prev.filter((r) => r.id !== reactionItem.id));
+      }, 2600);
     };
 
     const onQuizStarted = (data) => {
       setRoomState('in_progress');
+      setPowerUpsEnabled(data.enablePowerUps !== false);
       const loadedQuestions = data.questions && data.questions.length > 0 ? data.questions : [];
       setQuestions(loadedQuestions);
       questionsRef.current = loadedQuestions;
@@ -243,6 +293,7 @@ export const LiveRoom = () => {
     socket.on('leaderboard:updated', onLeaderboardUpdated);
     socket.on('participant:cancelled', onParticipantCancelled);
     socket.on('participant:answer-confirmed', onAnswerConfirmed);
+    socket.on('room:reaction', onRoomReaction);
     socket.on('quiz:ended', onQuizEnded);
     socket.on('connect_error', onConnectError);
     socket.on('error', onRoomError);
@@ -258,6 +309,7 @@ export const LiveRoom = () => {
       socket.off('leaderboard:updated', onLeaderboardUpdated);
       socket.off('participant:cancelled', onParticipantCancelled);
       socket.off('participant:answer-confirmed', onAnswerConfirmed);
+      socket.off('room:reaction', onRoomReaction);
       socket.off('quiz:ended', onQuizEnded);
       socket.off('connect_error', onConnectError);
       socket.off('error', onRoomError);
@@ -271,6 +323,7 @@ export const LiveRoom = () => {
     socket.emit('host:start-quiz', {
       roomCode: code.toUpperCase(),
       shuffleQuestions: shuffleQuestionsLobby,
+      enablePowerUps: enablePowerUpsLobby,
     });
   };
 
@@ -307,11 +360,107 @@ export const LiveRoom = () => {
     toast.error('You have cancelled this quiz session.');
   };
 
+  // Haptic feedback helper for mobile vibration
+  const triggerHaptic = useCallback((type = 'correct') => {
+    if (typeof window !== 'undefined' && 'vibrate' in navigator) {
+      try {
+        if (type === 'correct') {
+          navigator.vibrate([40, 60, 40]);
+        } else if (type === 'wrong') {
+          navigator.vibrate([120, 80, 120]);
+        } else if (type === 'streak') {
+          navigator.vibrate([60, 40, 60, 40, 100]);
+        } else if (type === 'powerup') {
+          navigator.vibrate([50]);
+        }
+      } catch {}
+    }
+  }, []);
+
+  const getStreakMultiplier = useCallback((s) => {
+    if (s >= 10) return 3.0;
+    if (s >= 5) return 2.0;
+    if (s >= 3) return 1.5;
+    if (s >= 2) return 1.2;
+    return 1.0;
+  }, []);
+
+  const getParticipantAvatar = useCallback((name) => {
+    const found = participantDetails.find((p) => p.name === name);
+    return found?.avatar || '🦊';
+  }, [participantDetails]);
+
+  const handleSendReaction = (emoji) => {
+    triggerHaptic('powerup');
+    const socket = getSocket();
+    socket.emit('room:send-reaction', {
+      roomCode: code.toUpperCase(),
+      emoji,
+    });
+  };
+
+  const handleSelectAvatar = (av) => {
+    setSelectedAvatar(av);
+    try {
+      localStorage.setItem('user_quiz_avatar', av);
+    } catch {}
+    triggerHaptic('powerup');
+    const socket = getSocket();
+    socket.emit('participant:join-room', {
+      roomCode: code.toUpperCase(),
+      participantName: user?.name || `Player_${Math.floor(Math.random() * 900 + 100)}`,
+      userId: user?.id || user?._id || null,
+      avatar: av,
+    });
+  };
+
+  const handleUseFiftyFifty = () => {
+    if (!powerUps.fiftyFifty || hasAnsweredCurrent || questionTimer.secondsLeft <= 0) return;
+    const qList = questionsRef.current.length > 0 ? questionsRef.current : questions;
+    const currentQuestion = qList[currentQIdxRef.current] || qList[currentQIdx];
+    if (!currentQuestion || !currentQuestion.options || currentQuestion.options.length <= 2) return;
+
+    const correctIdx = currentQuestion.correctIndex;
+    const wrongIndices = currentQuestion.options
+      .map((_, idx) => idx)
+      .filter((idx) => idx !== correctIdx);
+    const shuffledWrong = [...wrongIndices].sort(() => Math.random() - 0.5);
+    const toEliminate = shuffledWrong.slice(0, 2);
+
+    setEliminatedOptions(toEliminate);
+    setPowerUps((prev) => ({ ...prev, fiftyFifty: false }));
+    triggerHaptic('powerup');
+    toast.success('🌓 50/50 Activated! Two wrong options eliminated.');
+  };
+
+  const handleUseExtraTime = () => {
+    if (!powerUps.extraTime || hasAnsweredCurrent || questionTimer.secondsLeft <= 0) return;
+    setQuestionTimer((prev) => ({
+      secondsLeft: prev.secondsLeft + 15,
+      totalSeconds: prev.totalSeconds + 15,
+    }));
+    setPowerUps((prev) => ({ ...prev, extraTime: false }));
+    triggerHaptic('powerup');
+    toast.success('⏱️ +15 Seconds added to your timer!');
+  };
+
+  const handleUseDoubleDown = () => {
+    if (!powerUps.doubleDown || doubleDownActive || hasAnsweredCurrent || questionTimer.secondsLeft <= 0) return;
+    setDoubleDownActive(true);
+    setPowerUps((prev) => ({ ...prev, doubleDown: false }));
+    triggerHaptic('powerup');
+    toast('⚡ Double Down Active! 2x points if right!', { icon: '⚡' });
+  };
+
   const moveToNextQuestion = useCallback(() => {
     if (advanceTimerRef.current) {
       clearTimeout(advanceTimerRef.current);
       advanceTimerRef.current = null;
     }
+
+    // Reset per-question active powerups
+    setEliminatedOptions([]);
+    setDoubleDownActive(false);
 
     const qList = questionsRef.current.length > 0 ? questionsRef.current : questions;
     const currentIdx = currentQIdxRef.current;
@@ -346,11 +495,31 @@ export const LiveRoom = () => {
     hasAnsweredRef.current = true;
     setHasAnsweredCurrent(true);
     setAnswerResult('wrong');
+    setStreak(0);
+    triggerHaptic('wrong');
     soundManager.playIncorrect();
     toast('⏰ Time is up for this question!', { id: 'time-up-toast', icon: '⌛' });
 
     const qList = questionsRef.current.length > 0 ? questionsRef.current : questions;
     const currentQuestion = qList[currentQIdxRef.current];
+
+    // Record to answer review history
+    if (currentQuestion) {
+      setReviewHistory((prev) => [
+        ...prev,
+        {
+          questionIdx: currentQIdxRef.current,
+          questionTitle: currentQuestion.title,
+          options: currentQuestion.options || [],
+          selectedOptionText: '(Time expired)',
+          correctOptionText: currentQuestion.options?.[currentQuestion.correctIndex] || '',
+          isCorrect: false,
+          pointsAwarded: 0,
+          explanation: currentQuestion.explanation || '',
+        },
+      ]);
+    }
+
     const socket = getSocket();
     socket.emit('participant:submit-answer', {
       roomCode: code.toUpperCase(),
@@ -366,7 +535,7 @@ export const LiveRoom = () => {
     advanceTimerRef.current = setTimeout(() => {
       moveToNextQuestion();
     }, 600);
-  }, [questions, code, user, moveToNextQuestion]);
+  }, [questions, code, user, moveToNextQuestion, triggerHaptic]);
 
   // Pass both the option text and its index so we can compute correctness
   const handleAnswerSubmit = useCallback((optionText, optionIndex) => {
@@ -379,19 +548,51 @@ export const LiveRoom = () => {
 
     // Compute correctness client-side using correctIndex from server payload
     const isCorrect = optionIndex === currentQuestion.correctIndex;
-    const pointsAwarded = isCorrect ? (currentQuestion.points || 10) : 0;
+    let finalPoints = 0;
+
+    if (isCorrect) {
+      const nextStreak = streak + 1;
+      setStreak(nextStreak);
+      setMaxStreak((prev) => Math.max(prev, nextStreak));
+      const mult = getStreakMultiplier(nextStreak);
+      const basePts = Number(currentQuestion.points) || 10;
+      finalPoints = Math.round(basePts * mult * (doubleDownActive ? 2 : 1));
+
+      if (nextStreak >= 3) {
+        triggerHaptic('streak');
+      } else {
+        triggerHaptic('correct');
+      }
+      soundManager.playCorrect();
+      launchSprinkles();
+    } else {
+      setStreak(0);
+      triggerHaptic('wrong');
+      soundManager.playIncorrect();
+      finalPoints = doubleDownActive ? -5 : 0;
+    }
 
     setSelectedOption(optionText);
     setSelectedOptionIdx(optionIndex);
     setHasAnsweredCurrent(true);
     setAnswerResult(isCorrect ? 'correct' : 'wrong');
+    setLastPointsDelta(finalPoints);
+    setMyScore((prev) => Math.max(0, prev + finalPoints));
 
-    if (isCorrect) {
-      soundManager.playCorrect();
-      launchSprinkles();
-    } else {
-      soundManager.playIncorrect();
-    }
+    // Save to Post-Quiz Answer Review History
+    setReviewHistory((prev) => [
+      ...prev,
+      {
+        questionIdx: currentQIdxRef.current,
+        questionTitle: currentQuestion.title,
+        options: currentQuestion.options || [],
+        selectedOptionText: optionText,
+        correctOptionText: currentQuestion.options?.[currentQuestion.correctIndex] || '',
+        isCorrect,
+        pointsAwarded: finalPoints,
+        explanation: currentQuestion.explanation || '',
+      },
+    ]);
 
     const socket = getSocket();
     socket.emit('participant:submit-answer', {
@@ -400,7 +601,7 @@ export const LiveRoom = () => {
       questionId: currentQuestion.id || currentQuestion._id || null,
       selectedOptionText: optionText,
       isCorrect,
-      pointsAwarded,
+      pointsAwarded: finalPoints,
       userId: user?.id || user?._id || null,
     });
 
@@ -408,7 +609,19 @@ export const LiveRoom = () => {
     advanceTimerRef.current = setTimeout(() => {
       moveToNextQuestion();
     }, 450);
-  }, [questionTimer.secondsLeft, questions, currentQIdx, code, user, launchSprinkles, moveToNextQuestion]);
+  }, [
+    questionTimer.secondsLeft,
+    questions,
+    currentQIdx,
+    code,
+    user,
+    streak,
+    doubleDownActive,
+    getStreakMultiplier,
+    triggerHaptic,
+    launchSprinkles,
+    moveToNextQuestion,
+  ]);
 
   // 1. Local per-question timer countdown for the active participant
   useEffect(() => {
@@ -477,6 +690,19 @@ export const LiveRoom = () => {
 
   // Helper: compute per-option styling based on answered state
   const getOptionStyle = (optionText, optionIndex) => {
+    // 50/50 eliminated option
+    if (eliminatedOptions.includes(optionIndex)) {
+      return {
+        backgroundColor: 'var(--surface)',
+        color: 'var(--text-muted)',
+        border: '1px dashed var(--border)',
+        opacity: 0.28,
+        cursor: 'not-allowed',
+        textDecoration: 'line-through',
+        pointerEvents: 'none',
+      };
+    }
+
     if (!hasAnsweredCurrent && !isTimeUp) {
       return {
         backgroundColor: 'var(--surface-2)',
@@ -569,6 +795,59 @@ export const LiveRoom = () => {
             <span>{participants.length} Player{participants.length !== 1 ? 's' : ''} in Lobby</span>
           </div>
 
+          {/* Avatar Selection Picker for Players */}
+          {!isHost && (
+            <div
+              style={{
+                width: '100%',
+                maxWidth: '560px',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '0.65rem',
+                padding: '0.9rem',
+                backgroundColor: 'var(--surface-2)',
+                borderRadius: 'var(--radius-card)',
+                border: '1px solid var(--border)',
+                boxSizing: 'border-box',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                <span style={{ fontSize: '1.4rem' }}>{selectedAvatar}</span>
+                <span style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text)' }}>
+                  Choose Your Character Avatar
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', justifyContent: 'center' }}>
+                {AVATARS.map((av) => (
+                  <button
+                    key={av}
+                    type="button"
+                    onClick={() => handleSelectAvatar(av)}
+                    style={{
+                      width: '42px',
+                      height: '42px',
+                      borderRadius: '50%',
+                      border: selectedAvatar === av ? '2.5px solid var(--primary)' : '1px solid var(--border)',
+                      backgroundColor: selectedAvatar === av ? 'var(--primary-soft)' : 'var(--surface)',
+                      fontSize: '1.35rem',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transform: selectedAvatar === av ? 'scale(1.15)' : 'scale(1)',
+                      boxShadow: selectedAvatar === av ? '0 0 12px var(--primary)' : 'none',
+                      transition: 'all 0.15s ease',
+                    }}
+                    title={`Choose ${av}`}
+                  >
+                    {av}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Participant Chips Grid */}
           <div
             style={{
@@ -598,7 +877,7 @@ export const LiveRoom = () => {
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '0.4rem',
+                    gap: '0.45rem',
                     backgroundColor: 'var(--surface)',
                     border: '1px solid var(--border)',
                     padding: '0.35rem 0.8rem',
@@ -612,7 +891,7 @@ export const LiveRoom = () => {
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: 'var(--primary)', display: 'inline-block', flexShrink: 0 }} />
+                  <span style={{ fontSize: '1.05rem', lineHeight: 1 }}>{getParticipantAvatar(name)}</span>
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
                 </div>
               ))
@@ -648,6 +927,34 @@ export const LiveRoom = () => {
                   style={{ width: '16px', height: '16px', accentColor: 'var(--primary)', cursor: 'pointer' }}
                 />
                 <span>🔀 Shuffle questions per player</span>
+              </label>
+
+              <label
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.55rem',
+                  cursor: 'pointer',
+                  padding: '0.5rem 0.9rem',
+                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: 'var(--surface)',
+                  border: '1px solid var(--border)',
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  color: 'var(--text)',
+                  userSelect: 'none',
+                  width: '100%',
+                  justifyContent: 'center',
+                  boxSizing: 'border-box',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={enablePowerUpsLobby}
+                  onChange={(e) => setEnablePowerUpsLobby(e.target.checked)}
+                  style={{ width: '16px', height: '16px', accentColor: 'var(--primary)', cursor: 'pointer' }}
+                />
+                <span>⚡ Enable player Power-Ups (50/50, +15s, 2x)</span>
               </label>
 
               <Button
@@ -724,6 +1031,23 @@ export const LiveRoom = () => {
                 >
                   <Zap size={12} /> {myScore} pts
                 </div>
+              )}
+              {!isHost && streak >= 2 && (
+                <motion.div
+                  key={`streak-${streak}`}
+                  initial={{ scale: 0.85 }}
+                  animate={{ scale: [1, 1.12, 1] }}
+                  transition={{ duration: 0.45 }}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+                    backgroundColor: 'hsl(24 95% 53% / 0.16)', border: '1.5px solid hsl(24 95% 53%)',
+                    padding: '0.28rem 0.7rem', borderRadius: 'var(--radius-pill)',
+                    fontWeight: 900, fontSize: '0.82rem', color: 'hsl(24 95% 48%)',
+                    boxShadow: streak >= 3 ? '0 0 12px hsl(24 95% 53% / 0.35)' : 'none',
+                  }}
+                >
+                  <Flame size={13} /> 🔥 {streak}x Streak ({getStreakMultiplier(streak)}x)
+                </motion.div>
               )}
               {!isHost && !hasCompletedAllQuestions && !hasCancelled && (
                 <Button
@@ -919,10 +1243,11 @@ export const LiveRoom = () => {
                           opacity: isCancelled ? 0.7 : 1,
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
                           <span style={{ width: '28px', fontSize: '1.1rem', textAlign: 'center' }}>
                             {isCancelled ? '❌' : (medals[idx] || `#${idx + 1}`)}
                           </span>
+                          <span style={{ fontSize: '1.15rem' }}>{entry.avatar || '🦊'}</span>
                           <span style={{
                             fontWeight: isTop3 ? 800 : 600,
                             color: isCancelled ? 'hsl(0 84% 65%)' : 'var(--text)',
@@ -930,6 +1255,18 @@ export const LiveRoom = () => {
                           }}>
                             {entry.name}
                           </span>
+                          {entry.streak >= 2 && !isCancelled && (
+                            <span
+                              style={{
+                                display: 'inline-flex', alignItems: 'center', gap: '0.15rem',
+                                fontSize: '0.72rem', fontWeight: 800,
+                                color: 'hsl(24 95% 50%)', backgroundColor: 'hsl(24 95% 53% / 0.12)',
+                                padding: '0.1rem 0.4rem', borderRadius: 'var(--radius-pill)',
+                              }}
+                            >
+                              🔥 {entry.streak}
+                            </span>
+                          )}
                           {isCancelled ? (
                             <Badge variant="danger" style={{ backgroundColor: 'hsl(0 84% 55% / 0.15)', color: 'hsl(0 84% 65%)', border: '1px solid hsl(0 84% 55%)', fontSize: '0.72rem', fontWeight: 800 }}>
                               Cancelled
@@ -1026,6 +1363,20 @@ export const LiveRoom = () => {
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.6rem', padding: '0.6rem 1.4rem', borderRadius: 'var(--radius-pill)', backgroundColor: 'var(--primary-soft)', border: '1.5px solid var(--primary)', fontSize: '1.25rem', fontWeight: 900, color: 'var(--primary-text)' }}>
                   <Zap size={20} /> Your Score: {myScore} pts
                 </div>
+                {maxStreak >= 2 && (
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.9rem', fontWeight: 800, color: 'hsl(24 95% 48%)' }}>
+                    <Flame size={16} /> Highest Streak: {maxStreak} in a row!
+                  </div>
+                )}
+                {reviewHistory.length > 0 && (
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowReviewModal(true)}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', fontWeight: 800 }}
+                  >
+                    <Sparkles size={16} /> 📖 Review Questions & Answers ({reviewHistory.length})
+                  </Button>
+                )}
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>
                   Waiting for all players to finish... Live standings are updating below!
                 </p>
@@ -1051,7 +1402,13 @@ export const LiveRoom = () => {
                         <span style={{ fontWeight: 900, fontSize: '0.9rem', minWidth: '22px' }}>
                           {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
                         </span>
+                        <span style={{ fontSize: '1.1rem' }}>{entry.avatar || '🦊'}</span>
                         <span style={{ fontWeight: 700, color: 'var(--text)' }}>{entry.name}</span>
+                        {entry.streak >= 2 && (
+                          <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'hsl(24 95% 50%)', backgroundColor: 'hsl(24 95% 53% / 0.12)', padding: '0.1rem 0.4rem', borderRadius: 'var(--radius-pill)' }}>
+                            🔥 {entry.streak}
+                          </span>
+                        )}
                         {entry.answersCount !== undefined && (
                           <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', backgroundColor: 'var(--surface-2)', padding: '0.15rem 0.5rem', borderRadius: 'var(--radius-pill)' }}>
                             {entry.answersCount >= questions.length ? 'Finished' : `Q ${entry.answersCount}/${questions.length}`}
@@ -1070,6 +1427,133 @@ export const LiveRoom = () => {
 
           {!isHost && !hasCancelled && !hasCompletedAllQuestions && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%', boxSizing: 'border-box' }}>
+
+              {/* Power-Ups Bar (enabled/disabled by host) */}
+              {powerUpsEnabled && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '0.6rem',
+                  padding: '0.65rem 0.95rem',
+                  backgroundColor: 'var(--surface)',
+                  borderRadius: 'var(--radius-card)',
+                  border: '1.5px solid var(--border)',
+                  width: '100%',
+                  boxSizing: 'border-box',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 900, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <Sparkles size={12} color="var(--primary)" /> Power-Ups:
+                  </span>
+                  {/* 50/50 */}
+                  <button
+                    type="button"
+                    onClick={handleUseFiftyFifty}
+                    disabled={!powerUps.fiftyFifty || hasAnsweredCurrent || isTimeUp}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.3rem',
+                      padding: '0.3rem 0.75rem',
+                      borderRadius: 'var(--radius-pill)',
+                      border: powerUps.fiftyFifty ? '1.5px solid var(--primary)' : '1px solid var(--border)',
+                      backgroundColor: powerUps.fiftyFifty ? 'var(--primary-soft)' : 'var(--surface-2)',
+                      color: powerUps.fiftyFifty ? 'var(--primary-text)' : 'var(--text-muted)',
+                      fontWeight: 800,
+                      fontSize: '0.78rem',
+                      cursor: powerUps.fiftyFifty && !hasAnsweredCurrent && !isTimeUp ? 'pointer' : 'not-allowed',
+                      opacity: powerUps.fiftyFifty ? 1 : 0.45,
+                      transition: 'all 0.2s',
+                    }}
+                    title={powerUps.fiftyFifty ? 'Eliminate 2 wrong options' : '50/50 already used'}
+                  >
+                    <span>🌓</span> 50/50 {powerUps.fiftyFifty ? '' : '✓'}
+                  </button>
+
+                  {/* Extra Time */}
+                  <button
+                    type="button"
+                    onClick={handleUseExtraTime}
+                    disabled={!powerUps.extraTime || hasAnsweredCurrent || isTimeUp}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.3rem',
+                      padding: '0.3rem 0.75rem',
+                      borderRadius: 'var(--radius-pill)',
+                      border: powerUps.extraTime ? '1.5px solid hsl(217 91% 60%)' : '1px solid var(--border)',
+                      backgroundColor: powerUps.extraTime ? 'hsl(217 91% 60% / 0.12)' : 'var(--surface-2)',
+                      color: powerUps.extraTime ? 'hsl(217 91% 55%)' : 'var(--text-muted)',
+                      fontWeight: 800,
+                      fontSize: '0.78rem',
+                      cursor: powerUps.extraTime && !hasAnsweredCurrent && !isTimeUp ? 'pointer' : 'not-allowed',
+                      opacity: powerUps.extraTime ? 1 : 0.45,
+                      transition: 'all 0.2s',
+                    }}
+                    title={powerUps.extraTime ? 'Add +15 seconds to question' : 'Extra Time already used'}
+                  >
+                    <span>⏱️</span> +15s Time {powerUps.extraTime ? '' : '✓'}
+                  </button>
+
+                  {/* Double Down */}
+                  <button
+                    type="button"
+                    onClick={handleUseDoubleDown}
+                    disabled={!powerUps.doubleDown || doubleDownActive || hasAnsweredCurrent || isTimeUp}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.3rem',
+                      padding: '0.3rem 0.75rem',
+                      borderRadius: 'var(--radius-pill)',
+                      border: doubleDownActive
+                        ? '2px solid hsl(38 92% 50%)'
+                        : powerUps.doubleDown
+                        ? '1.5px solid hsl(38 92% 50% / 0.6)'
+                        : '1px solid var(--border)',
+                      backgroundColor: doubleDownActive
+                        ? 'hsl(38 92% 50% / 0.22)'
+                        : powerUps.doubleDown
+                        ? 'hsl(38 92% 50% / 0.12)'
+                        : 'var(--surface-2)',
+                      color: doubleDownActive ? 'hsl(38 92% 45%)' : powerUps.doubleDown ? 'hsl(38 92% 45%)' : 'var(--text-muted)',
+                      fontWeight: 800,
+                      fontSize: '0.78rem',
+                      cursor: powerUps.doubleDown && !doubleDownActive && !hasAnsweredCurrent && !isTimeUp ? 'pointer' : 'not-allowed',
+                      opacity: powerUps.doubleDown || doubleDownActive ? 1 : 0.45,
+                      boxShadow: doubleDownActive ? '0 0 10px hsl(38 92% 50% / 0.4)' : 'none',
+                      transition: 'all 0.2s',
+                    }}
+                    title={powerUps.doubleDown ? 'Double Down: 2x points if right!' : 'Double Down used'}
+                  >
+                    <span>⚡</span> {doubleDownActive ? '2X ACTIVE!' : '2x Points'} {!powerUps.doubleDown && !doubleDownActive ? '✓' : ''}
+                  </button>
+                </div>
+
+                {streak >= 2 && (
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      fontSize: '0.82rem',
+                      fontWeight: 900,
+                      color: 'hsl(24 95% 48%)',
+                      backgroundColor: 'hsl(24 95% 53% / 0.12)',
+                      padding: '0.2rem 0.6rem',
+                      borderRadius: 'var(--radius-pill)',
+                      border: '1px solid hsl(24 95% 53% / 0.4)',
+                    }}
+                  >
+                    <Flame size={14} /> 🔥 {streak}x Streak Active ({getStreakMultiplier(streak)}x)
+                  </div>
+                )}
+              </div>
+              )}
 
               {/* Big Timer Card */}
               <Card
@@ -1207,8 +1691,8 @@ export const LiveRoom = () => {
                       }}
                     >
                       {answerResult === 'correct'
-                        ? <><CheckCircle2 size={18} flexShrink={0} /> Correct! +{currentQ?.points || 10} pts — moving to next</>
-                        : <><XCircle size={18} flexShrink={0} /> Wrong answer — moving to next</>}
+                        ? <><CheckCircle2 size={18} flexShrink={0} /> Correct! +{lastPointsDelta || currentQ?.points || 10} pts{streak >= 2 ? ` (🔥 ${streak}x Streak)` : ''} — moving to next</>
+                        : <><XCircle size={18} flexShrink={0} /> {lastPointsDelta < 0 ? `Wrong (${lastPointsDelta} pts Double Down)` : 'Wrong answer'} — moving to next</>}
                     </motion.div>
                   ) : isTimeUp && !hasAnsweredCurrent ? (
                     <motion.div
@@ -1233,7 +1717,7 @@ export const LiveRoom = () => {
                   {(currentQ?.options || []).map((optionText, idx) => {
                     const letter = String.fromCharCode(65 + idx);
                     const optStyle = getOptionStyle(optionText, idx);
-                    const isOptionDisabled = hasAnsweredCurrent || isTimeUp;
+                    const isOptionDisabled = hasAnsweredCurrent || isTimeUp || eliminatedOptions.includes(idx);
                     const showCorrectIcon = (hasAnsweredCurrent || isTimeUp) && idx === currentQ?.correctIndex;
                     const showWrongIcon = hasAnsweredCurrent && (selectedOptionIdx === idx || selectedOption === optionText) && idx !== currentQ?.correctIndex;
 
@@ -1457,10 +1941,258 @@ export const LiveRoom = () => {
             ) : <div style={{ flex: 1, minWidth: 0 }} />}
           </div>
 
-          <Button onClick={() => navigate('/dashboard')} style={{ marginTop: '1rem' }}>
-            Back to Dashboard
-          </Button>
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center', marginTop: '1rem' }}>
+            {reviewHistory.length > 0 && (
+              <Button
+                variant="outline"
+                onClick={() => setShowReviewModal(true)}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', fontWeight: 800 }}
+              >
+                <Sparkles size={16} /> 📖 Review Questions & Answers ({reviewHistory.length})
+              </Button>
+            )}
+            <Button onClick={() => navigate('/dashboard')}>
+              Back to Dashboard
+            </Button>
+          </div>
         </Card>
+      )}
+
+      {/* Floating Reaction Emojis Particles Overlay */}
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          pointerEvents: 'none',
+          zIndex: 9998,
+          overflow: 'hidden',
+        }}
+      >
+        <AnimatePresence>
+          {floatingReactions.map((r) => (
+            <motion.div
+              key={r.id}
+              initial={{ opacity: 1, y: '90vh', scale: 0.8 }}
+              animate={{
+                opacity: [1, 1, 0],
+                y: '10vh',
+                scale: [0.8, 1.35, 1.05],
+              }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 2.3, ease: 'easeOut' }}
+              style={{
+                position: 'absolute',
+                left: `${r.left}%`,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                filter: 'drop-shadow(0 4px 10px rgba(0,0,0,0.35))',
+              }}
+            >
+              <span style={{ fontSize: '2.5rem', lineHeight: 1 }}>{r.emoji}</span>
+              {r.senderName && (
+                <span
+                  style={{
+                    fontSize: '0.68rem',
+                    fontWeight: 800,
+                    backgroundColor: 'rgba(0,0,0,0.72)',
+                    color: '#fff',
+                    padding: '0.12rem 0.45rem',
+                    borderRadius: '8px',
+                    marginTop: '2px',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {r.senderAvatar || '🦊'} {r.senderName}
+                </span>
+              )}
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+
+      {/* Interactive 1-Tap Reaction Emoji Dock */}
+      <div
+        style={{
+          position: 'fixed',
+          bottom: '1rem',
+          right: '1rem',
+          zIndex: 900,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.3rem',
+          backgroundColor: 'var(--surface)',
+          padding: '0.35rem 0.65rem',
+          borderRadius: 'var(--radius-pill)',
+          border: '1.5px solid var(--border)',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+          backdropFilter: 'blur(8px)',
+        }}
+      >
+        <span style={{ fontSize: '0.7rem', fontWeight: 900, color: 'var(--text-muted)', marginRight: '0.15rem' }}>
+          React:
+        </span>
+        {REACTION_EMOJIS.map((emoji) => (
+          <button
+            key={emoji}
+            type="button"
+            onClick={() => handleSendReaction(emoji)}
+            title={`Send ${emoji} reaction`}
+            style={{
+              background: 'none',
+              border: 'none',
+              fontSize: '1.25rem',
+              cursor: 'pointer',
+              padding: '0.2rem',
+              borderRadius: '50%',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'transform 0.15s ease',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.25)')}
+            onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+          >
+            {emoji}
+          </button>
+        ))}
+      </div>
+
+      {/* Post-Quiz Answer & Explanation Review Modal */}
+      {showReviewModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(6px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: 'clamp(0.75rem, 3vw, 1.5rem)',
+          }}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 15 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            style={{
+              backgroundColor: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-card)',
+              maxWidth: '720px',
+              width: '100%',
+              maxHeight: '85vh',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 25px 40px -10px rgba(0, 0, 0, 0.4)',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Modal Header */}
+            <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: 900, color: 'var(--text)', margin: 0 }}>
+                  📖 Performance & Answer Review
+                </h3>
+                <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '0.2rem 0 0 0' }}>
+                  Review your answers, correct solutions, and AI learning tips.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowReviewModal(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '0.4rem', borderRadius: '50%' }}
+              >
+                <XCircle size={22} />
+              </button>
+            </div>
+
+            {/* Scrollable Questions List */}
+            <div style={{ padding: '1.25rem 1.5rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem', flex: 1 }}>
+              {reviewHistory.length === 0 ? (
+                <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem 0' }}>
+                  No questions were recorded for review.
+                </p>
+              ) : (
+                reviewHistory.map((item, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      padding: '1rem',
+                      borderRadius: 'var(--radius-card)',
+                      backgroundColor: item.isCorrect ? 'hsl(142 71% 45% / 0.06)' : 'hsl(0 84% 55% / 0.06)',
+                      border: item.isCorrect ? '1.5px solid hsl(142 71% 45% / 0.4)' : '1.5px solid hsl(0 84% 55% / 0.4)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.65rem',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '0.78rem', fontWeight: 900, color: 'var(--text-muted)' }}>
+                        Question {idx + 1}
+                      </span>
+                      <Badge
+                        variant={item.isCorrect ? 'primary' : 'danger'}
+                        style={{
+                          backgroundColor: item.isCorrect ? 'hsl(142 71% 45%)' : 'hsl(0 84% 55%)',
+                          color: '#fff',
+                          fontSize: '0.72rem',
+                          fontWeight: 800,
+                        }}
+                      >
+                        {item.isCorrect ? `✓ Correct (+${item.pointsAwarded} pts)` : '✗ Incorrect (0 pts)'}
+                      </Badge>
+                    </div>
+
+                    <div style={{ fontSize: '0.98rem', fontWeight: 700, color: 'var(--text)', lineHeight: 1.4 }}>
+                      {item.questionTitle}
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.85rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: item.isCorrect ? 'hsl(142 71% 35%)' : 'hsl(0 84% 55%)' }}>
+                        <strong>Your Answer:</strong>
+                        <span>{item.selectedOptionText}</span>
+                      </div>
+                      {!item.isCorrect && item.correctOptionText && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'hsl(142 71% 35%)' }}>
+                          <strong>Correct Answer:</strong>
+                          <span>{item.correctOptionText}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {item.explanation && (
+                      <div
+                        style={{
+                          marginTop: '0.35rem',
+                          padding: '0.55rem 0.75rem',
+                          borderRadius: 'var(--radius-btn)',
+                          backgroundColor: 'var(--surface-2)',
+                          border: '1px solid var(--border)',
+                          fontSize: '0.8rem',
+                          color: 'var(--text-muted)',
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        <strong style={{ color: 'var(--primary)' }}>💡 Learning Tip: </strong>
+                        {item.explanation}
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{ padding: '0.9rem 1.5rem', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end' }}>
+              <Button onClick={() => setShowReviewModal(false)}>
+                Done
+              </Button>
+            </div>
+          </motion.div>
+        </div>
       )}
 
       {/* Confirmation Modal for Player Cancelling */}
